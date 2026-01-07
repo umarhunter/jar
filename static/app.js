@@ -41,21 +41,42 @@ socket.on('status', (data) => {
     }
 });
 
+// Accumulator for streaming response
+let streamingResponse = '';
+let streamingActive = false;
+
 socket.on('progress', (data) => {
     console.log('Progress:', data);
-    
+
+    // Handle streaming response chunks
+    if (data.step === 'streaming') {
+        if (!streamingActive) {
+            streamingActive = true;
+            // Initialize streaming display
+            displayStreamingStart();
+        }
+        // Accumulate and display chunk
+        streamingResponse += data.message;
+        updateStreamingResponse(streamingResponse);
+        return;
+    }
+
     // Update database indicators
     if (data.source) {
         updateDatabaseIndicator(data.source, data.step);
     }
-    
+
     // Add to reasoning log
     addReasoningEntry(data.source, data.message, data.reasoning, data.data);
 });
 
 socket.on('result', (data) => {
     console.log('Result:', data);
-    
+
+    // Reset streaming state
+    streamingActive = false;
+    streamingResponse = '';
+
     // Reset all indicators to complete
     Object.keys(indicators).forEach(key => {
         if (indicators[key].classList.contains('active')) {
@@ -64,10 +85,10 @@ socket.on('result', (data) => {
             updateIndicatorStatus(key, 'Complete');
         }
     });
-    
-    // Display result
+
+    // Display result (will show the complete response if not already streaming)
     displayResult(data);
-    
+
     // Re-enable form
     isProcessing = false;
     submitBtn.disabled = false;
@@ -108,6 +129,10 @@ queryForm.addEventListener('submit', (e) => {
     clearResults();
     clearReasoningLog();
     resetDatabaseIndicators();
+
+    // Reset streaming state
+    streamingResponse = '';
+    streamingActive = false;
     
     // Disable form
     isProcessing = true;
@@ -117,6 +142,34 @@ queryForm.addEventListener('submit', (e) => {
     // Send query to server
     socket.emit('query', { query });
 });
+
+// Streaming helper functions
+function displayStreamingStart() {
+    resultsDisplay.innerHTML = '';
+
+    const card = document.createElement('div');
+    card.className = 'result-card healthy streaming';
+    card.id = 'streaming-card';
+
+    card.innerHTML = `
+        <div class="result-header">✍️ Generating Response...</div>
+        <div class="result-response">
+            <div id="streaming-content"></div>
+            <span class="streaming-cursor">▋</span>
+        </div>
+    `;
+
+    resultsDisplay.appendChild(card);
+}
+
+function updateStreamingResponse(content) {
+    const streamingContent = document.getElementById('streaming-content');
+    if (streamingContent) {
+        streamingContent.innerHTML = formatResponse(content);
+        // Auto-scroll to bottom
+        resultsDisplay.scrollTop = resultsDisplay.scrollHeight;
+    }
+}
 
 // Helper functions
 function updateConnectionStatus(connected) {

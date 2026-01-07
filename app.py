@@ -111,10 +111,10 @@ def handle_query(data):
             })
             return
         
-        # Process query through agent
+        # Process query through agent with streaming enabled
         # Agent will emit progress updates via the callback
-        response = agent.query(query)
-        
+        response = agent.query(query, streaming=True)
+
         # Emit final result
         emit('result', {
             'message': 'Query processing complete',

@@ -362,16 +362,51 @@ header h1 {
     background: #6b7280;
 }
 
+/* Streaming Response */
+.result-card.streaming {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 20px 5px rgba(102, 126, 234, 0.1);
+    }
+}
+
+.streaming-cursor {
+    display: inline-block;
+    animation: blink 1s step-end infinite;
+    color: #667eea;
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+@keyframes blink {
+    0%, 50% {
+        opacity: 1;
+    }
+    51%, 100% {
+        opacity: 0;
+    }
+}
+
+#streaming-content {
+    display: inline;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .main-content {
         grid-template-columns: 1fr;
     }
-    
+
     header h1 {
         font-size: 1.8em;
     }
-    
+
     .status-badge {
         position: static;
         display: inline-block;

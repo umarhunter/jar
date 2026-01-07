@@ -1,6 +1,6 @@
 """
 LlamaIndex Agent for Natural Language Observability Queries.
-Uses FunctionAgent with workflow-based approach to orchestrate queries across multiple data sources.
+Uses ReActAgent to orchestrate queries across multiple data sources with streaming support.
 """
 import os
 import asyncio
@@ -13,8 +13,7 @@ load_dotenv()
 from llama_index.core import SQLDatabase
 from llama_index.core.query_engine import NLSQLTableQueryEngine
 from llama_index.core.tools import QueryEngineTool
-from llama_index.core.agent.workflow import FunctionAgent
-from llama_index.core.workflow import Context
+from llama_index.core.agent import ReActAgent
 from llama_index.llms.openai import OpenAI
 from prometheus_engine import PrometheusQueryEngine
 from elasticsearch_engine import ElasticsearchQueryEngine
@@ -46,7 +45,7 @@ class ObservabilityAgent:
         if openai_api_key:
             os.environ['OPENAI_API_KEY'] = openai_api_key
         
-        self.llm = OpenAI(model="gpt-4", temperature=0)
+        self.llm = OpenAI(model="gpt-4o", temperature=0)
         
         # Initialize data sources
         self._setup_oracle_engine()
@@ -191,10 +190,10 @@ class ObservabilityAgent:
                            'Ready to query application logs and traces')
     
     def _setup_agent(self):
-        """Set up the FunctionAgent with query engine tools."""
+        """Set up the ReActAgent with query engine tools."""
         self._emit_progress('setup', 'Creating agent with multi-tool orchestration...', None,
-                           'Setting up FunctionAgent to coordinate queries across data sources')
-        
+                           'Setting up ReActAgent to coordinate queries across data sources')
+
         # Wrap engines as tools using from_defaults
         oracle_tool = QueryEngineTool.from_defaults(
             query_engine=self.oracle_query_engine,
@@ -210,7 +209,7 @@ class ObservabilityAgent:
                 "'Show me recent incidents'"
             )
         )
-        
+
         prometheus_tool = QueryEngineTool.from_defaults(
             query_engine=self.prometheus_query_engine,
             name="prometheus_metrics",
@@ -245,66 +244,78 @@ class ObservabilityAgent:
             )
         )
 
-        # Create FunctionAgent with workflow approach
-        self.agent = FunctionAgent(
+        # Create ReActAgent with streaming support
+        self.agent = ReActAgent(
             tools=[oracle_tool, prometheus_tool, elasticsearch_tool],
             llm=self.llm,
-            system_prompt=(
-                "You are an observability assistant that helps users understand application health and performance.\n"
-                "You have access to three data sources:\n"
-                "1. Oracle database - contains application configurations, thresholds, and historical incidents\n"
-                "2. Prometheus - contains real-time performance metrics (CPU, memory, requests, errors, latency)\n"
-                "3. Elasticsearch - contains application logs, error traces, and log-level messages\n\n"
-                "When answering questions about application performance:\n"
-                "- Check Oracle for thresholds and configuration\n"
-                "- Check Prometheus for current metrics\n"
-                "- Check Elasticsearch for detailed error logs and traces\n"
-                "- Compare metrics against thresholds\n"
-                "- Correlate metrics with log data to provide deeper insights\n"
-                "- Provide clear, actionable insights\n\n"
-                "Always synthesize information from multiple sources to give complete answers.\n"
-                "Use natural language and be helpful and concise."
-            )
+            verbose=self.verbose,
+            streaming=True  # Enable streaming by default
         )
-        
-        # Create workflow context
-        self.ctx = Context(self.agent)
-        
+
         self._emit_progress('setup_complete', 'Agent ready to process queries', None,
                            'All data sources connected and agent is operational')
     
-    def query(self, user_query: str) -> str:
+    def query(self, user_query: str, streaming: bool = False) -> str:
         """
         Process a natural language query.
-        
+
         Args:
             user_query: Natural language question about application health
-            
+            streaming: If True, stream the response as it's generated
+
         Returns:
             Natural language response synthesized from data sources
         """
         self._emit_progress('started', f'Processing query: "{user_query}"', None,
                            'Analyzing query and determining which data sources to consult')
-        
+
         try:
-            # Execute query through agent using workflow API
-            # The workflow needs to run in a new event loop since Flask-SocketIO is synchronous
-            async def run_query():
-                handler = self.agent.run(user_query, ctx=self.ctx)
-                return await handler
-            
-            # Run in a new event loop (works with Flask-SocketIO threading mode)
+            # Create and set event loop before running agent
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+
             try:
-                response = loop.run_until_complete(run_query())
+                # Run the agent workflow (must be called with loop already set)
+                async def run_agent():
+                    return self.agent.run(user_query)
+
+                handler = loop.run_until_complete(run_agent())
+
+                if streaming:
+                    # Stream events from the workflow to capture reasoning steps
+                    async def stream_workflow():
+                        result_str = None
+
+                        # Stream workflow events to capture agent reasoning
+                        async for event in handler.stream_events():
+                            # Emit reasoning steps (Thought, Action, Observation)
+                            if hasattr(event, 'msg'):
+                                self._emit_progress('agent_reasoning', str(event.msg), None,
+                                                   f'Agent step: {type(event).__name__}')
+
+                        # Get final result
+                        result = await handler
+                        result_str = str(result)
+
+                        # Stream the final response in chunks (typewriter effect)
+                        for i in range(0, len(result_str), 5):
+                            chunk = result_str[i:i+5]
+                            self._emit_progress('streaming', chunk, None, 'Streaming response')
+
+                        return result_str
+
+                    final_response = loop.run_until_complete(stream_workflow())
+                else:
+                    # Non-streaming: just wait for the result
+                    final_response = str(loop.run_until_complete(handler))
+
             finally:
                 loop.close()
-            
+
             self._emit_progress('complete', 'Query processing complete', None,
                                'Successfully synthesized response from all relevant data sources')
-            
-            return str(response)
+
+            return final_response
             
         except Exception as e:
             error_msg = str(e)
@@ -322,7 +333,7 @@ class ObservabilityAgent:
     
     def reset(self):
         """Reset agent conversation history."""
-        # Recreate context for fresh conversation
-        self.ctx = Context(self.agent)
+        # Reset the agent's chat history
+        self.agent.reset()
         self._emit_progress('reset', 'Agent conversation reset', None,
                            'Cleared conversation history for new query session')
