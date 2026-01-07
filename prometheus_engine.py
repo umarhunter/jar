@@ -61,7 +61,7 @@ class PrometheusQueryEngine(CustomQueryEngine):
             time_window = query_info.get('time_window', 'current')
             metric_type = query_info.get('metric_type', 'unknown')
             
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, KeyError, AttributeError) as e:
             # Fallback if parsing fails
             promql = "up{}"
             time_window = 'current'

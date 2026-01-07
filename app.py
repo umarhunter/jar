@@ -12,7 +12,8 @@ from agent import ObservabilityAgent
 eventlet.monkey_patch()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+# Use environment variable for secret key, with secure random fallback for development
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Global agent instance

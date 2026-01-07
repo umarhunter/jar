@@ -243,9 +243,16 @@ function formatResponse(response) {
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    // More robust HTML escaping for security
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#x27;',
+        '/': '&#x2F;',
+    };
+    return String(text).replace(/[&<>"'/]/g, (s) => map[s]);
 }
 
 function showNotification(message, type) {

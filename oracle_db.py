@@ -160,7 +160,7 @@ def create_sample_database(db_path: str = 'oracle_pilot.db'):
             incident_type='high_cpu', severity='warning',
             description='CPU usage sustained above 85% for 15 minutes',
             occurred_at=now - timedelta(days=3),
-            resolved_at=now - timedelta(days=3, hours=-1),
+            resolved_at=now - timedelta(days=2, hours=23),
             status='resolved'
         ),
         Incident(
@@ -168,7 +168,7 @@ def create_sample_database(db_path: str = 'oracle_pilot.db'):
             incident_type='service_unavailable', severity='critical',
             description='Service returned 503 errors for 5 minutes',
             occurred_at=now - timedelta(days=7),
-            resolved_at=now - timedelta(days=7, hours=-1),
+            resolved_at=now - timedelta(days=6, hours=23),
             status='resolved'
         ),
     ]
