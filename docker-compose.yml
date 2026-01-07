@@ -84,6 +84,16 @@ services:
       - jar-network
     restart: unless-stopped
 
+  # Pushgateway for pushing custom metrics
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: jar-pushgateway
+    ports:
+      - "9091:9091"
+    networks:
+      - jar-network
+    restart: unless-stopped
+
 volumes:
   jar_data:
     driver: local

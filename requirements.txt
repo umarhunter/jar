@@ -4,6 +4,7 @@ aiosignal==1.4.0
 aiosqlite==0.22.1
 annotated-types==0.7.0
 anyio==4.12.1
+asyncio==4.0.0
 attrs==25.4.0
 banks==2.2.0
 beautifulsoup4==4.14.3
@@ -18,11 +19,13 @@ defusedxml==0.7.1
 Deprecated==1.2.18
 dirtyjson==1.0.8
 distro==1.9.0
+dnspython==2.8.0
 filetype==1.2.0
 Flask==3.1.2
 Flask-SocketIO==5.6.0
 frozenlist==1.8.0
 fsspec==2025.12.0
+greenlet==3.3.0
 griffe==1.15.0
 h11==0.16.0
 httpcore==1.0.9

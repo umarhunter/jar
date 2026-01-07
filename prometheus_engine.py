@@ -175,18 +175,34 @@ class PrometheusQueryEngine(CustomQueryEngine):
                     'value': 0,
                     'unit': '',
                     'timestamp': datetime.now().isoformat(),
-                    'error': 'No data returned from Prometheus'
+                    'error': 'No data returned from Prometheus',
+                    'all_results': []
                 }
             
-            # Parse the first result (simplification - could handle multiple series)
-            metric_data = results[0]
-            metric_labels = metric_data.get('metric', {})
-            metric_name = metric_labels.get('__name__', 'unknown')
-            value_data = metric_data.get('value', [None, '0'])
+            # Parse ALL results (multiple applications/instances)
+            all_metrics = []
+            for metric_data in results:
+                metric_labels = metric_data.get('metric', {})
+                metric_name = metric_labels.get('__name__', 'unknown')
+                value_data = metric_data.get('value', [None, '0'])
+                
+                # value_data is [timestamp, value]
+                timestamp = datetime.fromtimestamp(float(value_data[0])) if value_data[0] else datetime.now()
+                value = float(value_data[1]) if len(value_data) > 1 else 0.0
+                
+                instance = metric_labels.get('instance', 'unknown')
+                
+                all_metrics.append({
+                    'metric': metric_name,
+                    'value': value,
+                    'instance': instance,
+                    'timestamp': timestamp.isoformat(),
+                    'labels': metric_labels
+                })
             
-            # value_data is [timestamp, value]
-            timestamp = datetime.fromtimestamp(float(value_data[0])) if value_data[0] else datetime.now()
-            value = float(value_data[1]) if len(value_data) > 1 else 0.0
+            # Use the first metric for compatibility with existing code
+            first_metric = all_metrics[0]
+            metric_name = first_metric['metric']
             
             # Determine unit from metric name
             unit = ''
@@ -201,11 +217,12 @@ class PrometheusQueryEngine(CustomQueryEngine):
             
             return {
                 'metric': metric_name,
-                'value': value,
+                'value': first_metric['value'],
                 'unit': unit,
-                'timestamp': timestamp.isoformat(),
-                'labels': metric_labels,
-                'promql': promql
+                'timestamp': first_metric['timestamp'],
+                'labels': first_metric['labels'],
+                'promql': promql,
+                'all_results': all_metrics
             }
             
         except requests.RequestException as e:
@@ -233,7 +250,48 @@ class PrometheusQueryEngine(CustomQueryEngine):
         metric = results.get('metric', 'unknown')
         value = results.get('value', 0)
         unit = results.get('unit', '')
+        all_results = results.get('all_results', [])
         
+        # If we have multiple applications, provide a comprehensive summary
+        if len(all_results) > 1:
+            summary_lines = []
+            
+            if metric_type == 'cpu':
+                summary_lines.append(f"CPU usage across {len(all_results)} applications:")
+                for app in all_results:
+                    instance = app['instance']
+                    app_value = app['value']
+                    status = "⚠️ HIGH" if app_value > 80 else "⚠️ MODERATE" if app_value > 60 else "✓ NORMAL"
+                    summary_lines.append(f"  - {instance}: {app_value:.1f}{unit} ({status})")
+                return "\n".join(summary_lines)
+            
+            elif metric_type == 'memory':
+                summary_lines.append(f"Memory usage across {len(all_results)} applications:")
+                for app in all_results:
+                    instance = app['instance']
+                    app_value = app['value']
+                    status = "⚠️ HIGH" if app_value > 85 else "⚠️ MODERATE" if app_value > 70 else "✓ NORMAL"
+                    summary_lines.append(f"  - {instance}: {app_value:.1f}{unit} ({status})")
+                return "\n".join(summary_lines)
+            
+            elif metric_type == 'latency':
+                summary_lines.append(f"Response times across {len(all_results)} applications:")
+                for app in all_results:
+                    instance = app['instance']
+                    app_value = app['value']
+                    status = "⚠️ HIGH" if app_value > 500 else "⚠️ MODERATE" if app_value > 300 else "✓ GOOD"
+                    summary_lines.append(f"  - {instance}: {app_value:.1f}{unit} ({status})")
+                return "\n".join(summary_lines)
+            
+            else:
+                summary_lines.append(f"{metric} across {len(all_results)} applications:")
+                for app in all_results:
+                    instance = app['instance']
+                    app_value = app['value']
+                    summary_lines.append(f"  - {instance}: {app_value:.1f}{unit}")
+                return "\n".join(summary_lines)
+        
+        # Single result summary (original logic)
         if metric_type == 'cpu':
             if value > 80:
                 return f"High CPU usage detected: {value:.1f}{unit}"

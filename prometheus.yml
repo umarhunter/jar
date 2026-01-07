@@ -29,3 +29,10 @@ scrape_configs:
           environment: 'production'
     metrics_path: '/metrics'
     scrape_timeout: 5s
+
+  # Pushgateway - for custom metrics from dummy data
+  - job_name: 'pushgateway'
+    honor_labels: true
+    static_configs:
+      - targets: ['pushgateway:9091']
+    scrape_timeout: 5s

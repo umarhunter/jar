@@ -15,9 +15,59 @@ from llama_index.core.query_engine import NLSQLTableQueryEngine
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.agent import ReActAgent
 from llama_index.llms.openai import OpenAI
+from llama_index.core.callbacks import CBEventType, CallbackManager
+from llama_index.core.callbacks.base import BaseCallbackHandler
 from prometheus_engine import PrometheusQueryEngine
 from elasticsearch_engine import ElasticsearchQueryEngine
 from oracle_db import get_database_engine
+
+
+class ReasoningCallbackHandler(BaseCallbackHandler):
+    """Custom callback handler to capture agent reasoning steps."""
+
+    def __init__(self, progress_callback: Optional[Callable] = None):
+        """Initialize with progress callback."""
+        self.progress_callback = progress_callback
+        super().__init__(event_starts_to_ignore=[], event_ends_to_ignore=[])
+
+    def on_event_start(self, event_type: CBEventType, payload: Optional[dict] = None,
+                       event_id: str = "", **kwargs) -> str:
+        """Capture event starts (thoughts, actions)."""
+        if self.progress_callback and payload:
+            if event_type == CBEventType.AGENT_STEP:
+                # Capture agent reasoning step
+                thought = payload.get("thought", "")
+                if thought:
+                    self.progress_callback({
+                        'step': 'agent_thought',
+                        'message': thought,
+                        'source': 'agent',
+                        'reasoning': 'Agent decision-making process'
+                    })
+        return event_id
+
+    def on_event_end(self, event_type: CBEventType, payload: Optional[dict] = None,
+                     event_id: str = "", **kwargs) -> None:
+        """Capture event ends (observations, tool results)."""
+        if self.progress_callback and payload:
+            if event_type == CBEventType.AGENT_STEP:
+                # Capture tool observation
+                response = payload.get("response")
+                if response:
+                    self.progress_callback({
+                        'step': 'agent_observation',
+                        'message': f"Tool returned: {str(response)[:100]}...",
+                        'source': 'agent',
+                        'reasoning': 'Observation from tool execution'
+                    })
+
+    def start_trace(self, trace_id: Optional[str] = None) -> None:
+        """Start a trace."""
+        pass
+
+    def end_trace(self, trace_id: Optional[str] = None, trace_map: Optional[dict] = None) -> None:
+        """End a trace."""
+        pass
 
 
 class ObservabilityAgent:
@@ -244,12 +294,16 @@ class ObservabilityAgent:
             )
         )
 
-        # Create ReActAgent with streaming support
+        # Create callback manager with reasoning handler
+        reasoning_handler = ReasoningCallbackHandler(progress_callback=self.progress_callback)
+        callback_manager = CallbackManager([reasoning_handler])
+
+        # Create ReActAgent with callback manager
         self.agent = ReActAgent(
             tools=[oracle_tool, prometheus_tool, elasticsearch_tool],
             llm=self.llm,
             verbose=self.verbose,
-            streaming=True  # Enable streaming by default
+            callback_manager=callback_manager
         )
 
         self._emit_progress('setup_complete', 'Agent ready to process queries', None,
@@ -276,24 +330,15 @@ class ObservabilityAgent:
 
             try:
                 # Run the agent workflow (must be called with loop already set)
+                # The callback manager will capture reasoning steps in real-time
                 async def run_agent():
                     return self.agent.run(user_query)
 
                 handler = loop.run_until_complete(run_agent())
 
                 if streaming:
-                    # Stream events from the workflow to capture reasoning steps
+                    # Get the result and stream it in chunks (typewriter effect)
                     async def stream_workflow():
-                        result_str = None
-
-                        # Stream workflow events to capture agent reasoning
-                        async for event in handler.stream_events():
-                            # Emit reasoning steps (Thought, Action, Observation)
-                            if hasattr(event, 'msg'):
-                                self._emit_progress('agent_reasoning', str(event.msg), None,
-                                                   f'Agent step: {type(event).__name__}')
-
-                        # Get final result
                         result = await handler
                         result_str = str(result)
 
