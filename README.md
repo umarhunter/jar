@@ -81,6 +81,59 @@ python app.py
 
 5. Open your browser to `http://localhost:5000`
 
+### Docker Setup (Recommended)
+
+The easiest way to run JAR is using Docker Compose:
+
+1. Clone the repository:
+```bash
+git clone https://github.com/umarhunter/jar.git
+cd jar
+```
+
+2. Create a `.env` file with your OpenAI API key:
+```bash
+cp .env.example .env
+# Edit .env and add your OPENAI_API_KEY
+```
+
+3. Start the application:
+```bash
+docker compose up --build
+```
+
+4. Open your browser to `http://localhost:5000`
+
+The application will:
+- Build the Docker image automatically
+- Start the Flask-SocketIO server on port 5000
+- Persist the SQLite database in a Docker volume
+- Automatically restart if the container stops
+
+To stop the application:
+```bash
+docker compose down
+```
+
+To stop and remove the database volume:
+```bash
+docker compose down -v
+```
+
+### Development with Docker
+
+For development with live code reloading, uncomment the volume mount in [docker-compose.yml](docker-compose.yml):
+```yaml
+volumes:
+  - jar_data:/app/data
+  - .:/app  # Uncomment this line
+```
+
+Then restart the container:
+```bash
+docker compose up --build
+```
+
 ## Project Structure
 
 ```

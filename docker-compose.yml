@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  jar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jar-app
+    ports:
+      - "5000:5000"
+    environment:
+      # Required: OpenAI API key (load from .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Optional: Flask secret key (will generate random if not provided)
+      - SECRET_KEY=${SECRET_KEY:-}
+      # Database path inside container
+      - DATABASE_PATH=/app/data/oracle_pilot.db
+    volumes:
+      # Persist database across container restarts
+      - jar_data:/app/data
+      # Optional: Mount source code for development (uncomment for live reload)
+      # - .:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - jar-network
+
+volumes:
+  jar_data:
+    driver: local
+
+networks:
+  jar-network:
+    driver: bridge
