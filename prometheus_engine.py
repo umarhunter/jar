@@ -8,7 +8,6 @@ from llama_index.core import PromptTemplate
 from llama_index.llms.openai import OpenAI
 import requests
 import json
-import random
 import os
 from datetime import datetime, timedelta
 
@@ -38,36 +37,30 @@ class PrometheusQueryEngine(CustomQueryEngine):
     """Custom query engine for Prometheus metrics."""
 
     llm: OpenAI
-    mock_mode: bool = False  # Use real Prometheus by default
     prometheus_url: str = ""
 
-    def __init__(self, llm: OpenAI, mock_mode: bool = False, prometheus_url: Optional[str] = None, **kwargs):
+    def __init__(self, llm: OpenAI, prometheus_url: Optional[str] = None, **kwargs):
         """
         Initialize Prometheus query engine.
 
         Args:
             llm: OpenAI LLM instance
-            mock_mode: If True, generate mock data instead of querying Prometheus
-            prometheus_url: URL of Prometheus server (default: http://prometheus:9090 or env PROMETHEUS_URL)
+            prometheus_url: URL of Prometheus server (default: http://localhost:9090 or env PROMETHEUS_URL)
         """
         if prometheus_url is None:
             prometheus_url = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
 
-        super().__init__(llm=llm, mock_mode=mock_mode, prometheus_url=prometheus_url, **kwargs)
+        super().__init__(llm=llm, prometheus_url=prometheus_url, **kwargs)
 
-        # Test Prometheus connection if not in mock mode
-        if not mock_mode:
-            try:
-                response = requests.get(f"{prometheus_url}/api/v1/status/config", timeout=5)
-                if response.status_code == 200:
-                    print(f"Connected to Prometheus at {prometheus_url}")
-                else:
-                    print(f"Warning: Prometheus returned status {response.status_code}, falling back to mock mode")
-                    self.mock_mode = True
-            except Exception as e:
-                print(f"Warning: Failed to connect to Prometheus at {prometheus_url}: {e}")
-                print("Falling back to mock mode")
-                self.mock_mode = True
+        # Test Prometheus connection
+        try:
+            response = requests.get(f"{prometheus_url}/api/v1/status/config", timeout=5)
+            if response.status_code == 200:
+                print(f"Connected to Prometheus at {prometheus_url}")
+            else:
+                raise ConnectionError(f"Prometheus returned status {response.status_code}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Prometheus at {prometheus_url}: {e}")
     
     def custom_query(self, query_str: str) -> Any:
         """Execute a query against Prometheus."""
@@ -96,12 +89,8 @@ class PrometheusQueryEngine(CustomQueryEngine):
             time_window = 'current'
             metric_type = 'unknown'
         
-        # Step 2: Execute the PromQL query (mock for pilot)
-        if self.mock_mode:
-            results = self._mock_prometheus_query(promql, metric_type, time_window)
-        else:
-            # Would call actual Prometheus API here
-            results = self._query_prometheus_api(promql, time_window)
+        # Step 2: Execute the PromQL query
+        results = self._query_prometheus_api(promql, time_window)
         
         # Step 3: Format results for the agent
         return {
@@ -112,60 +101,6 @@ class PrometheusQueryEngine(CustomQueryEngine):
             'results': results,
             'summary': self._generate_summary(results, metric_type)
         }
-    
-    def _mock_prometheus_query(self, promql: str, metric_type: str, time_window: str) -> dict:
-        """Generate mock Prometheus data for pilot phase."""
-        
-        timestamp = datetime.now()
-        
-        if metric_type == 'cpu':
-            return {
-                'metric': 'cpu_usage_percent',
-                'value': random.uniform(45.0, 85.0),
-                'unit': '%',
-                'timestamp': timestamp.isoformat()
-            }
-        elif metric_type == 'memory':
-            return {
-                'metric': 'memory_usage_percent',
-                'value': random.uniform(60.0, 90.0),
-                'unit': '%',
-                'timestamp': timestamp.isoformat()
-            }
-        elif metric_type == 'requests':
-            return {
-                'metric': 'request_rate',
-                'value': random.uniform(100.0, 500.0),
-                'unit': 'req/s',
-                'timestamp': timestamp.isoformat()
-            }
-        elif metric_type == 'errors':
-            error_count = random.randint(0, 50)
-            return {
-                'metric': 'error_count',
-                'value': error_count,
-                'unit': 'errors',
-                'timestamp': timestamp.isoformat(),
-                'recent_errors': [
-                    {'code': '401', 'count': error_count // 3, 'message': 'Unauthorized'},
-                    {'code': '500', 'count': error_count // 3, 'message': 'Internal Server Error'},
-                    {'code': '503', 'count': error_count // 3, 'message': 'Service Unavailable'}
-                ] if error_count > 10 else []
-            }
-        elif metric_type == 'latency':
-            return {
-                'metric': 'response_time',
-                'value': random.uniform(50.0, 600.0),
-                'unit': 'ms',
-                'timestamp': timestamp.isoformat()
-            }
-        else:
-            return {
-                'metric': 'general',
-                'value': 1.0,
-                'unit': '',
-                'timestamp': timestamp.isoformat()
-            }
     
     def _query_prometheus_api(self, promql: str, time_window: str) -> dict:
         """Query actual Prometheus API using HTTP requests."""

@@ -96,8 +96,8 @@ class ObservabilityAgent:
         """
         status = {
             'oracle': {'connected': False, 'error': None},
-            'prometheus': {'connected': False, 'mode': None, 'error': None},
-            'elasticsearch': {'connected': False, 'mode': None, 'error': None}
+            'prometheus': {'connected': False, 'error': None},
+            'elasticsearch': {'connected': False, 'error': None}
         }
         
         # Test Oracle
@@ -113,12 +113,10 @@ class ObservabilityAgent:
         # Test Prometheus
         if hasattr(self, 'prometheus_query_engine'):
             status['prometheus']['connected'] = True
-            status['prometheus']['mode'] = 'mock' if self.prometheus_query_engine.mock_mode else 'live'
         
         # Test Elasticsearch
         if hasattr(self, 'elasticsearch_query_engine'):
             status['elasticsearch']['connected'] = True
-            status['elasticsearch']['mode'] = 'mock' if self.elasticsearch_query_engine.mock_mode else 'live'
         
         return status
     
@@ -168,8 +166,7 @@ class ObservabilityAgent:
                            'Setting up connection to metrics database')
 
         self.prometheus_query_engine = PrometheusQueryEngine(
-            llm=self.llm,
-            mock_mode=False  # Use real Prometheus (falls back to mock if unavailable)
+            llm=self.llm
         )
 
         self._emit_progress('setup_complete', 'Prometheus query engine initialized', 'prometheus',
@@ -181,8 +178,7 @@ class ObservabilityAgent:
                            'Setting up connection to logs database')
 
         self.elasticsearch_query_engine = ElasticsearchQueryEngine(
-            llm=self.llm,
-            mock_mode=False  # Use real Elasticsearch (falls back to mock if unavailable)
+            llm=self.llm
         )
 
         self._emit_progress('setup_complete', 'Elasticsearch query engine initialized', 'elasticsearch',

@@ -8,7 +8,6 @@ from llama_index.core.prompts import PromptTemplate
 from llama_index.llms.openai import OpenAI
 import requests
 import json
-import random
 import os
 from datetime import datetime, timedelta
 
@@ -45,11 +44,10 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
     """Custom query engine for Elasticsearch logs and traces."""
 
     llm: OpenAI
-    mock_mode: bool = False  # Use real Elasticsearch by default
     elasticsearch_host: str = ""
     index_pattern: str = "logs-*"
 
-    def __init__(self, llm: OpenAI, mock_mode: bool = False,
+    def __init__(self, llm: OpenAI,
                  elasticsearch_host: Optional[str] = None,
                  index_pattern: str = "logs-*", **kwargs):
         """
@@ -57,28 +55,23 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
 
         Args:
             llm: OpenAI LLM instance
-            mock_mode: If True, generate mock data instead of querying Elasticsearch
-            elasticsearch_host: Elasticsearch host (default: http://elasticsearch:9200 or env ELASTICSEARCH_HOST)
+            elasticsearch_host: Elasticsearch host (default: http://localhost:9200 or env ELASTICSEARCH_HOST)
             index_pattern: Index pattern to search (default: logs-*)
         """
         if elasticsearch_host is None:
             elasticsearch_host = os.getenv('ELASTICSEARCH_HOST', 'http://localhost:9200')
 
-        super().__init__(llm=llm, mock_mode=mock_mode, elasticsearch_host=elasticsearch_host, index_pattern=index_pattern, **kwargs)
+        super().__init__(llm=llm, elasticsearch_host=elasticsearch_host, index_pattern=index_pattern, **kwargs)
 
-        # Test Elasticsearch connection if not in mock mode
-        if not mock_mode:
-            try:
-                response = requests.get(f"{elasticsearch_host}/_cluster/health", timeout=5)
-                if response.status_code == 200:
-                    print(f"Connected to Elasticsearch at {elasticsearch_host}")
-                else:
-                    print(f"Warning: Elasticsearch returned status {response.status_code}, falling back to mock mode")
-                    self.mock_mode = True
-            except Exception as e:
-                print(f"Warning: Failed to connect to Elasticsearch at {elasticsearch_host}: {e}")
-                print("Falling back to mock mode")
-                self.mock_mode = True
+        # Test Elasticsearch connection
+        try:
+            response = requests.get(f"{elasticsearch_host}/_cluster/health", timeout=5)
+            if response.status_code == 200:
+                print(f"Connected to Elasticsearch at {elasticsearch_host}")
+            else:
+                raise ConnectionError(f"Elasticsearch returned status {response.status_code}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Elasticsearch at {elasticsearch_host}: {e}")
 
     def custom_query(self, query_str: str) -> Any:
         """Execute a query against Elasticsearch."""
@@ -111,16 +104,10 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
             application = 'all'
             search_terms = []
 
-        # Step 2: Execute the Elasticsearch query (mock for pilot)
-        if self.mock_mode:
-            results = self._mock_elasticsearch_query(
-                query_type, time_window, log_level, application, search_terms
-            )
-        else:
-            # Would call actual Elasticsearch API here
-            results = self._query_elasticsearch_api(
-                query_type, time_window, log_level, application, search_terms
-            )
+        # Step 2: Execute the Elasticsearch query
+        results = self._query_elasticsearch_api(
+            query_type, time_window, log_level, application, search_terms
+        )
 
         # Step 3: Format results for the agent
         return {
@@ -131,76 +118,6 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
             'application': application,
             'results': results,
             'summary': self._generate_summary(results, query_type, log_level)
-        }
-
-    def _mock_elasticsearch_query(
-        self,
-        query_type: str,
-        time_window: str,
-        log_level: str,
-        application: str,
-        search_terms: List[str]
-    ) -> Dict:
-        """Generate mock Elasticsearch data for pilot phase."""
-
-        timestamp = datetime.now()
-
-        # Mock applications
-        apps = ['user-service', 'payment-gateway', 'notification-service', 'analytics-engine']
-        if application != 'all' and application in apps:
-            apps = [application]
-
-        # Generate mock log entries
-        total_logs = random.randint(100, 1000)
-        error_count = random.randint(5, 50) if log_level in ['ERROR', 'ALL'] else 0
-        warn_count = random.randint(10, 100) if log_level in ['WARN', 'ALL'] else 0
-        info_count = total_logs - error_count - warn_count if log_level == 'ALL' else total_logs
-
-        # Generate mock error entries
-        error_types = [
-            'NullPointerException',
-            'ConnectionTimeout',
-            'DatabaseConnectionError',
-            'AuthenticationFailure',
-            'RateLimitExceeded',
-            'InvalidRequestException'
-        ]
-
-        recent_errors = []
-        if query_type == 'errors' or log_level == 'ERROR':
-            for i in range(min(error_count, 10)):
-                recent_errors.append({
-                    'timestamp': (timestamp - timedelta(minutes=random.randint(1, int(time_window or 60)))).isoformat(),
-                    'application': random.choice(apps),
-                    'level': 'ERROR',
-                    'message': random.choice(error_types),
-                    'trace': f'at com.example.service.Handler.process(Handler.java:{random.randint(100, 500)})'
-                })
-
-        # Generate mock trace data
-        traces = []
-        if query_type == 'traces':
-            for i in range(5):
-                traces.append({
-                    'trace_id': f'trace-{random.randint(10000, 99999)}',
-                    'application': random.choice(apps),
-                    'duration_ms': random.randint(100, 2000),
-                    'error': random.choice([True, False]),
-                    'timestamp': (timestamp - timedelta(minutes=random.randint(1, 30))).isoformat()
-                })
-
-        return {
-            'total_logs': total_logs,
-            'time_range': f'Last {time_window} minutes' if time_window != 'all' else 'All time',
-            'log_counts': {
-                'ERROR': error_count,
-                'WARN': warn_count,
-                'INFO': info_count
-            },
-            'recent_errors': sorted(recent_errors, key=lambda x: x['timestamp'], reverse=True),
-            'traces': traces,
-            'applications_affected': apps[:random.randint(1, len(apps))],
-            'timestamp': timestamp.isoformat()
         }
 
     def _query_elasticsearch_api(
