@@ -12,6 +12,16 @@ import os
 from datetime import datetime, timedelta
 
 
+def parse_llm_json_response(response_text: str) -> str:
+    """Extract JSON from LLM response that may be wrapped in code blocks."""
+    response_text = response_text.strip()
+    if response_text.startswith("```json"):
+        response_text = response_text.split("```json")[1].split("```")[0].strip()
+    elif response_text.startswith("```"):
+        response_text = response_text.split("```")[1].split("```")[0].strip()
+    return response_text
+
+
 ELASTICSEARCH_QUERY_PROMPT = PromptTemplate(
     "You are an expert in Elasticsearch and its Query DSL.\n"
     "Given a natural language query about application logs and errors, generate the appropriate Elasticsearch query.\n"
@@ -101,12 +111,7 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
 
         try:
             # Parse the LLM response
-            response_text = response.text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif response_text.startswith("```"):
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-
+            response_text = parse_llm_json_response(response.text)
             query_info = json.loads(response_text)
             query_type = query_info.get('query_type', 'logs')
             time_window = query_info.get('time_window', '60')

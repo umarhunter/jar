@@ -331,28 +331,18 @@ class ObservabilityAgent:
             try:
                 # Run the agent workflow (must be called with loop already set)
                 # The callback manager will capture reasoning steps in real-time
-                async def run_agent():
-                    return self.agent.run(user_query)
-
-                handler = loop.run_until_complete(run_agent())
+                result = loop.run_until_complete(self.agent.arun(user_query))
+                result_str = str(result)
 
                 if streaming:
-                    # Get the result and stream it in chunks (typewriter effect)
-                    async def stream_workflow():
-                        result = await handler
-                        result_str = str(result)
-
-                        # Stream the final response in chunks (typewriter effect)
-                        for i in range(0, len(result_str), 5):
-                            chunk = result_str[i:i+5]
-                            self._emit_progress('streaming', chunk, None, 'Streaming response')
-
-                        return result_str
-
-                    final_response = loop.run_until_complete(stream_workflow())
+                    # Stream the final response in chunks (typewriter effect)
+                    for i in range(0, len(result_str), 5):
+                        chunk = result_str[i:i+5]
+                        self._emit_progress('streaming', chunk, None, 'Streaming response')
+                    final_response = result_str
                 else:
-                    # Non-streaming: just wait for the result
-                    final_response = str(loop.run_until_complete(handler))
+                    # Non-streaming: just return the result
+                    final_response = result_str
 
             finally:
                 loop.close()
