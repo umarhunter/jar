@@ -34,16 +34,21 @@ ELASTICSEARCH_QUERY_PROMPT = PromptTemplate(
     "- Specific error messages or patterns\n\n"
     "Query: {query_str}\n\n"
     "Extract:\n"
-    "- Time window (e.g., 'last 30 minutes', 'past hour', 'today')\n"
+    "- Time window: Convert to minutes. Examples:\n"
+    "  * 'last 30 minutes' or 'past hour' -> number of minutes\n"
+    "  * 'last 24 hours' or 'today' -> 1440\n"
+    "  * 'last 7 days' or 'past week' -> 10080\n"
+    "  * 'last 30 days' or 'past month' -> 43200\n"
+    "  * 'all time' or no time mentioned -> 'all'\n"
     "- Log level filter (INFO, WARN, ERROR, FATAL)\n"
-    "- Application name if mentioned\n"
+    "- Application name if mentioned (match: payment-gateway, user-service, notification-service, analytics-engine)\n"
     "- Search terms or error patterns\n\n"
     "Respond ONLY with valid JSON using DOUBLE QUOTES:\n"
     "{{\n"
     "  \"query_type\": \"<errors|logs|traces>\",\n"
-    "  \"time_window\": \"<time window in minutes or 'all'>\",\n"
+    "  \"time_window\": \"<number of minutes as integer or 'all'>\",\n"
     "  \"log_level\": \"<INFO|WARN|ERROR|FATAL|ALL>\",\n"
-    "  \"application\": \"<application name or 'all'>\",\n"
+    "  \"application\": \"<exact application name or 'all'>\",\n"
     "  \"search_terms\": [\"<term1>\", \"<term2>\"]\n"
     "}}\n\n"
     "Response:"
@@ -122,11 +127,34 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         except (json.JSONDecodeError, ValueError, KeyError, AttributeError) as e:
             # Fallback if parsing fails
             print(f"Warning: Failed to parse Elasticsearch query response: {e}")
+            print(f"Raw response: {response.text[:200]}")
             # Smart defaults based on query keywords
             query_type = 'errors' if 'error' in query_str.lower() else 'logs'
-            time_window = '60'
+            
+            # Try to extract time from query
+            if '30 day' in query_str.lower() or 'month' in query_str.lower():
+                time_window = '43200'  # 30 days
+            elif '7 day' in query_str.lower() or 'week' in query_str.lower():
+                time_window = '10080'  # 7 days
+            elif '24 hour' in query_str.lower() or 'today' in query_str.lower() or 'day' in query_str.lower():
+                time_window = '1440'  # 24 hours
+            else:
+                time_window = '60'
+            
             log_level = 'ERROR' if 'error' in query_str.lower() else 'ALL'
-            application = 'all'
+            
+            # Try to extract application name
+            if 'payment' in query_str.lower():
+                application = 'payment-gateway'
+            elif 'user' in query_str.lower():
+                application = 'user-service'
+            elif 'notification' in query_str.lower():
+                application = 'notification-service'
+            elif 'analytics' in query_str.lower():
+                application = 'analytics-engine'
+            else:
+                application = 'all'
+            
             search_terms = []
 
         # Step 2: Execute the Elasticsearch query

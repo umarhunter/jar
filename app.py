@@ -111,9 +111,9 @@ def handle_query(data):
             })
             return
         
-        # Process query through agent with streaming enabled
+        # Process query through agent (streaming is always enabled)
         # Agent will emit progress updates via the callback
-        response = agent.query(query, streaming=True)
+        response = agent.query(query)
 
         # Emit final result
         emit('result', {

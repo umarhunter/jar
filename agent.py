@@ -309,13 +309,12 @@ class ObservabilityAgent:
         self._emit_progress('setup_complete', 'Agent ready to process queries', None,
                            'All data sources connected and agent is operational')
     
-    def query(self, user_query: str, streaming: bool = False) -> str:
+    def query(self, user_query: str) -> str:
         """
-        Process a natural language query.
+        Process a natural language query with streaming response.
 
         Args:
             user_query: Natural language question about application health
-            streaming: If True, stream the response as it's generated
 
         Returns:
             Natural language response synthesized from data sources
@@ -324,33 +323,23 @@ class ObservabilityAgent:
                            'Analyzing query and determining which data sources to consult')
 
         try:
-            # Create and set event loop before running agent
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Define async function to run the agent
+            async def _run_agent_async():
+                result = await self.agent.run(user_query)
+                return str(result)
+            
+            # Run the async function and get result
+            result_str = asyncio.run(_run_agent_async())
 
-            try:
-                # Run the agent workflow (must be called with loop already set)
-                # The callback manager will capture reasoning steps in real-time
-                result = loop.run_until_complete(self.agent.arun(user_query))
-                result_str = str(result)
-
-                if streaming:
-                    # Stream the final response in chunks (typewriter effect)
-                    for i in range(0, len(result_str), 5):
-                        chunk = result_str[i:i+5]
-                        self._emit_progress('streaming', chunk, None, 'Streaming response')
-                    final_response = result_str
-                else:
-                    # Non-streaming: just return the result
-                    final_response = result_str
-
-            finally:
-                loop.close()
+            # Stream the final response in chunks (typewriter effect)
+            for i in range(0, len(result_str), 5):
+                chunk = result_str[i:i+5]
+                self._emit_progress('streaming', chunk, None, 'Streaming response')
 
             self._emit_progress('complete', 'Query processing complete', None,
                                'Successfully synthesized response from all relevant data sources')
 
-            return final_response
+            return result_str
             
         except Exception as e:
             error_msg = str(e)
