@@ -6,8 +6,8 @@ Natural Language Observability Query System - A proof-of-concept system that all
 
 JAR uses LlamaIndex with ReActAgent to orchestrate queries across multiple data sources:
 - **Oracle Database** (simulated with SQLite) - Application configuration, thresholds, and historical incidents
-- **Prometheus** - Real-time metrics (CPU, memory, request rates, errors, latency)
-- **Elasticsearch** - Application logs and error traces (mock mode enabled, real integration optional)
+- **Prometheus** - Real-time metrics from Node Exporter (CPU, memory, system metrics)
+- **Elasticsearch** - Application logs and error traces (real instance included)
 
 ### Example Queries
 
@@ -111,8 +111,10 @@ docker compose up --build
 The application will:
 - Build the Docker image automatically
 - Start the Flask-SocketIO server on port 5000
-- Persist the SQLite database in a Docker volume
-- Automatically restart if the container stops
+- Launch Prometheus on port 9090
+- Launch Elasticsearch on port 9200
+- Persist all data in Docker volumes
+- Automatically restart containers if they stop
 
 To stop the application:
 ```bash
@@ -190,17 +192,28 @@ python app.py
 
 The app runs with Flask debug mode enabled by default.
 
-### Enabling Real Elasticsearch
+### Accessing Monitoring Tools
 
-To use a real Elasticsearch instance instead of mock data:
+When running with Docker Compose, you can access:
 
-1. Uncomment the Elasticsearch service in [docker-compose.yml](docker-compose.yml)
-2. Uncomment the environment variables in the `jar` service
-3. Uncomment the `depends_on` section
-4. Modify [elasticsearch_engine.py](elasticsearch_engine.py) to connect to real Elasticsearch:
-   - Set `mock_mode=False`
-   - Implement `_query_elasticsearch_api()` method with actual Elasticsearch client calls
-5. Restart with `docker compose up --build`
+- **JAR Application**: http://localhost:5000
+- **Prometheus UI**: http://localhost:9090
+- **Elasticsearch**: http://localhost:9200
+- **Node Exporter Metrics**: http://localhost:9100/metrics
+
+### Understanding the Data Sources
+
+**Prometheus:**
+- Scrapes metrics from Node Exporter (system metrics)
+- Stores time-series data for CPU, memory, disk, network
+- JAR queries Prometheus via PromQL
+- Metrics are real-time from your Docker host system
+
+**Elasticsearch:**
+- Starts empty - ready to receive logs
+- JAR will fall back to mock mode until logs are ingested
+- Use Filebeat, Logstash, or direct API to send logs
+- Expected schema: `@timestamp`, `level`, `application`, `message`, `error.*`
 
 ### Extending Data Sources
 
@@ -210,17 +223,17 @@ To add new data sources:
 2. Wrap it as a QueryEngineTool
 3. Add to agent in [agent.py](agent.py)
 
-## Limitations (Pilot Phase)
+## Current Limitations
 
-- Uses mock data for Prometheus and Elasticsearch (no actual connections by default)
 - SQLite simulates Oracle database
 - Single-user (no authentication)
-- Mock data generation for logs and metrics
+- Elasticsearch starts empty (falls back to mock data until logs are ingested)
+- Prometheus queries Node Exporter only (application-specific metrics require instrumentation)
 
 ## Future Enhancements
 
-- [ ] Real Prometheus API integration
-- [ ] Real Elasticsearch API integration (currently using mock data)
+- [ ] Application metrics instrumentation (Prometheus exporters for JAR apps)
+- [ ] Automatic log ingestion pipeline (Filebeat/Logstash integration)
 - [ ] User authentication
 - [ ] Query history
 - [ ] Saved queries
@@ -228,6 +241,8 @@ To add new data sources:
 - [ ] Multi-tenancy support
 - [ ] Advanced log filtering and aggregation
 - [ ] Alerting based on query results
+- [ ] Grafana integration for visualization
+- [ ] Distributed tracing (Jaeger/Zipkin)
 
 ## License
 

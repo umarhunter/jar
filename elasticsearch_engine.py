@@ -6,8 +6,10 @@ from typing import Any, Optional, List, Dict
 from llama_index.core.query_engine import CustomQueryEngine
 from llama_index.core.prompts import PromptTemplate
 from llama_index.llms.openai import OpenAI
+from elasticsearch import Elasticsearch
 import json
 import random
+import os
 from datetime import datetime, timedelta
 
 
@@ -43,10 +45,42 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
     """Custom query engine for Elasticsearch logs and traces."""
 
     llm: OpenAI
-    mock_mode: bool = True  # For pilot, use mock data
+    mock_mode: bool = False  # Use real Elasticsearch by default
+    es_client: Optional[Elasticsearch] = None
+    index_pattern: str = "logs-*"
 
-    def __init__(self, llm: OpenAI, mock_mode: bool = True, **kwargs):
-        super().__init__(llm=llm, mock_mode=mock_mode, **kwargs)
+    def __init__(self, llm: OpenAI, mock_mode: bool = False,
+                 elasticsearch_host: Optional[str] = None,
+                 index_pattern: str = "logs-*", **kwargs):
+        """
+        Initialize Elasticsearch query engine.
+
+        Args:
+            llm: OpenAI LLM instance
+            mock_mode: If True, generate mock data instead of querying Elasticsearch
+            elasticsearch_host: Elasticsearch host (default: http://elasticsearch:9200 or env ELASTICSEARCH_HOST)
+            index_pattern: Index pattern to search (default: logs-*)
+        """
+        if elasticsearch_host is None:
+            elasticsearch_host = os.getenv('ELASTICSEARCH_HOST', 'http://elasticsearch:9200')
+
+        super().__init__(llm=llm, mock_mode=mock_mode, index_pattern=index_pattern, **kwargs)
+
+        # Initialize Elasticsearch client if not in mock mode
+        if not mock_mode:
+            try:
+                self.es_client = Elasticsearch([elasticsearch_host])
+                # Test connection
+                if self.es_client.ping():
+                    print(f"✅ Connected to Elasticsearch at {elasticsearch_host}")
+                else:
+                    print(f"⚠️ Elasticsearch at {elasticsearch_host} is not responding")
+                    print("Falling back to mock mode")
+                    self.mock_mode = True
+            except Exception as e:
+                print(f"⚠️ Failed to connect to Elasticsearch at {elasticsearch_host}: {e}")
+                print("Falling back to mock mode")
+                self.mock_mode = True
 
     def custom_query(self, query_str: str) -> Any:
         """Execute a query against Elasticsearch."""
@@ -179,8 +213,113 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         application: str,
         search_terms: List[str]
     ) -> Dict:
-        """Query actual Elasticsearch API (not implemented in pilot)."""
-        raise NotImplementedError("Actual Elasticsearch API integration not implemented in pilot phase")
+        """Query actual Elasticsearch API."""
+        if not self.es_client:
+            print("⚠️ Elasticsearch client not initialized, using mock data")
+            return self._mock_elasticsearch_query(query_type, time_window, log_level, application, search_terms)
+
+        try:
+            # Build Elasticsearch query
+            query_body = {
+                "size": 100,
+                "query": {
+                    "bool": {
+                        "must": [],
+                        "filter": []
+                    }
+                },
+                "sort": [{"@timestamp": {"order": "desc"}}]
+            }
+
+            # Add time range filter
+            if time_window and time_window != 'all':
+                try:
+                    minutes = int(time_window)
+                    query_body["query"]["bool"]["filter"].append({
+                        "range": {
+                            "@timestamp": {
+                                "gte": f"now-{minutes}m",
+                                "lte": "now"
+                            }
+                        }
+                    })
+                except ValueError:
+                    pass
+
+            # Add log level filter
+            if log_level and log_level != 'ALL':
+                query_body["query"]["bool"]["must"].append({
+                    "match": {"level": log_level}
+                })
+
+            # Add application filter
+            if application and application != 'all':
+                query_body["query"]["bool"]["must"].append({
+                    "match": {"application": application}
+                })
+
+            # Add search terms
+            if search_terms:
+                for term in search_terms:
+                    query_body["query"]["bool"]["must"].append({
+                        "multi_match": {
+                            "query": term,
+                            "fields": ["message", "error.message", "error.type"]
+                        }
+                    })
+
+            # Execute search
+            response = self.es_client.search(index=self.index_pattern, body=query_body)
+
+            # Parse results
+            hits = response.get('hits', {}).get('hits', [])
+            total_logs = response.get('hits', {}).get('total', {}).get('value', 0)
+
+            # Aggregate log levels
+            log_counts = {"ERROR": 0, "WARN": 0, "INFO": 0}
+            recent_errors = []
+            applications_affected = set()
+
+            for hit in hits:
+                source = hit.get('_source', {})
+                level = source.get('level', 'INFO')
+                log_counts[level] = log_counts.get(level, 0) + 1
+
+                app = source.get('application', 'unknown')
+                applications_affected.add(app)
+
+                # Collect error details
+                if level == 'ERROR' and len(recent_errors) < 10:
+                    recent_errors.append({
+                        'timestamp': source.get('@timestamp', datetime.now().isoformat()),
+                        'application': app,
+                        'level': level,
+                        'message': source.get('message', 'No message'),
+                        'trace': source.get('error', {}).get('stack_trace', '')[:200]
+                    })
+
+            return {
+                'total_logs': total_logs,
+                'time_range': f'Last {time_window} minutes' if time_window != 'all' else 'All time',
+                'log_counts': log_counts,
+                'recent_errors': recent_errors,
+                'traces': [],  # Would extract from span data if available
+                'applications_affected': list(applications_affected),
+                'timestamp': datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            print(f"⚠️ Error querying Elasticsearch: {e}")
+            return {
+                'total_logs': 0,
+                'time_range': f'Last {time_window} minutes',
+                'log_counts': {'ERROR': 0, 'WARN': 0, 'INFO': 0},
+                'recent_errors': [],
+                'traces': [],
+                'applications_affected': [],
+                'timestamp': datetime.now().isoformat(),
+                'error': str(e)
+            }
 
     def _generate_summary(self, results: Dict, query_type: str, log_level: str) -> str:
         """Generate a human-readable summary of the results."""

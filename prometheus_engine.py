@@ -4,10 +4,12 @@ Translates natural language queries to PromQL and executes them.
 """
 from typing import Any, Optional
 from llama_index.core.query_engine import CustomQueryEngine
-from llama_index.core.prompts import PromptTemplate
+from llama_index.core import PromptTemplate
 from llama_index.llms.openai import OpenAI
+from prometheus_api_client import PrometheusConnect
 import json
 import random
+import os
 from datetime import datetime, timedelta
 
 
@@ -34,12 +36,35 @@ PROMQL_GENERATION_PROMPT = PromptTemplate(
 
 class PrometheusQueryEngine(CustomQueryEngine):
     """Custom query engine for Prometheus metrics."""
-    
+
     llm: OpenAI
-    mock_mode: bool = True  # For pilot, use mock data
-    
-    def __init__(self, llm: OpenAI, mock_mode: bool = True, **kwargs):
-        super().__init__(llm=llm, mock_mode=mock_mode, **kwargs)
+    mock_mode: bool = False  # Use real Prometheus by default
+    prometheus_url: str = ""
+    prom_client: Optional[PrometheusConnect] = None
+
+    def __init__(self, llm: OpenAI, mock_mode: bool = False, prometheus_url: Optional[str] = None, **kwargs):
+        """
+        Initialize Prometheus query engine.
+
+        Args:
+            llm: OpenAI LLM instance
+            mock_mode: If True, generate mock data instead of querying Prometheus
+            prometheus_url: URL of Prometheus server (default: http://prometheus:9090 or env PROMETHEUS_URL)
+        """
+        if prometheus_url is None:
+            prometheus_url = os.getenv('PROMETHEUS_URL', 'http://prometheus:9090')
+
+        super().__init__(llm=llm, mock_mode=mock_mode, prometheus_url=prometheus_url, **kwargs)
+
+        # Initialize Prometheus client if not in mock mode
+        if not mock_mode:
+            try:
+                self.prom_client = PrometheusConnect(url=prometheus_url, disable_ssl=True)
+                print(f"✅ Connected to Prometheus at {prometheus_url}")
+            except Exception as e:
+                print(f"⚠️ Failed to connect to Prometheus at {prometheus_url}: {e}")
+                print("Falling back to mock mode")
+                self.mock_mode = True
     
     def custom_query(self, query_str: str) -> Any:
         """Execute a query against Prometheus."""
@@ -140,8 +165,70 @@ class PrometheusQueryEngine(CustomQueryEngine):
             }
     
     def _query_prometheus_api(self, promql: str, time_window: str) -> dict:
-        """Query actual Prometheus API (not implemented in pilot)."""
-        raise NotImplementedError("Actual Prometheus API integration not implemented in pilot phase")
+        """Query actual Prometheus API."""
+        if not self.prom_client:
+            print("⚠️ Prometheus client not initialized, using mock data")
+            return self._mock_prometheus_query(promql, 'unknown', time_window)
+
+        try:
+            # Query Prometheus
+            result = self.prom_client.custom_query(query=promql)
+
+            if not result:
+                return {
+                    'metric': 'no_data',
+                    'value': 0,
+                    'unit': '',
+                    'timestamp': datetime.now().isoformat(),
+                    'error': 'No data returned from Prometheus'
+                }
+
+            # Parse the first result (simplification - could handle multiple series)
+            if len(result) > 0:
+                metric_data = result[0]
+                metric_name = metric_data.get('metric', {}).get('__name__', 'unknown')
+                value_data = metric_data.get('value', [None, 0])
+
+                # value_data is [timestamp, value]
+                timestamp = datetime.fromtimestamp(float(value_data[0])) if value_data[0] else datetime.now()
+                value = float(value_data[1]) if len(value_data) > 1 else 0.0
+
+                # Determine unit and metric type from metric name
+                unit = ''
+                if 'percent' in metric_name or 'usage' in metric_name:
+                    unit = '%'
+                elif 'bytes' in metric_name:
+                    unit = 'B'
+                elif 'seconds' in metric_name:
+                    unit = 's'
+                elif 'total' in metric_name:
+                    unit = 'count'
+
+                return {
+                    'metric': metric_name,
+                    'value': value,
+                    'unit': unit,
+                    'timestamp': timestamp.isoformat(),
+                    'labels': metric_data.get('metric', {}),
+                    'promql': promql
+                }
+            else:
+                return {
+                    'metric': 'empty_result',
+                    'value': 0,
+                    'unit': '',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+        except Exception as e:
+            print(f"⚠️ Error querying Prometheus: {e}")
+            return {
+                'metric': 'error',
+                'value': 0,
+                'unit': '',
+                'timestamp': datetime.now().isoformat(),
+                'error': str(e)
+            }
     
     def _generate_summary(self, results: dict, metric_type: str) -> str:
         """Generate a human-readable summary of the results."""

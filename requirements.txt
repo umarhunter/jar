@@ -7,3 +7,4 @@ llama-index==0.13.0
 sqlalchemy==2.0.23
 requests==2.31.0
 elasticsearch==8.11.0
+prometheus-api-client==0.5.3

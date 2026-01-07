@@ -86,7 +86,7 @@ class ObservabilityAgent:
 
         self.prometheus_query_engine = PrometheusQueryEngine(
             llm=self.llm,
-            mock_mode=True  # Using mock data for pilot
+            mock_mode=False  # Use real Prometheus (falls back to mock if unavailable)
         )
 
         self._emit_progress('setup_complete', 'Prometheus query engine initialized', 'prometheus',
@@ -99,7 +99,7 @@ class ObservabilityAgent:
 
         self.elasticsearch_query_engine = ElasticsearchQueryEngine(
             llm=self.llm,
-            mock_mode=True  # Using mock data for pilot
+            mock_mode=False  # Use real Elasticsearch (falls back to mock if unavailable)
         )
 
         self._emit_progress('setup_complete', 'Elasticsearch query engine initialized', 'elasticsearch',

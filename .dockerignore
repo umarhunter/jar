@@ -43,6 +43,7 @@ LICENSE
 Dockerfile
 docker-compose.yml
 .dockerignore
+prometheus.yml
 
 # Test files
 tests/
