@@ -7,7 +7,7 @@ Natural Language Observability Query System - A proof-of-concept system that all
 JAR uses LlamaIndex with ReActAgent to orchestrate queries across multiple data sources:
 - **Oracle Database** (simulated with SQLite) - Application configuration, thresholds, and historical incidents
 - **Prometheus** - Real-time metrics (CPU, memory, request rates, errors, latency)
-- **Elasticsearch** - Application logs and error traces (planned for phase 2)
+- **Elasticsearch** - Application logs and error traces (mock mode enabled, real integration optional)
 
 ### Example Queries
 
@@ -17,14 +17,18 @@ JAR uses LlamaIndex with ReActAgent to orchestrate queries across multiple data 
 - "What applications are we monitoring?"
 - "What is the memory threshold for payment-gateway?"
 - "Show me recent incidents"
+- "Show me recent error logs"
+- "What errors occurred in the last hour?"
+- "Are there any authentication failures?"
 
 ## Features
 
 - 🤖 **Natural Language Queries**: Ask questions in plain English
 - 🔄 **Real-time Progress Streaming**: See which databases are being queried via WebSocket
 - 🧠 **Agent Reasoning**: Transparent view of agent's decision-making process
-- 📊 **Multi-source Synthesis**: Combines data from Oracle and Prometheus
+- 📊 **Multi-source Synthesis**: Combines data from Oracle, Prometheus, and Elasticsearch
 - 🎨 **Clean UI**: Native HTML/CSS/JS with Socket.IO
+- 📝 **Log Analysis**: Query and analyze application logs and error traces
 
 ## Architecture
 
@@ -33,10 +37,10 @@ User Query (Natural Language)
     ↓
 LlamaIndex ReActAgent
     ↓
-┌─────────────┬──────────────────┐
-│             │                  │
+┌─────────────┬──────────────────┬──────────────────┐
+│             │                  │                  │
 Oracle DB     Prometheus      Elasticsearch
-(Config)      (Metrics)       (Logs - Phase 2)
+(Config)      (Metrics)          (Logs)
     │             │                  │
     └─────────────┴──────────────────┘
                   ↓
@@ -142,7 +146,10 @@ jar/
 ├── agent.py                # LlamaIndex ReActAgent orchestrator
 ├── oracle_db.py            # Oracle database setup (SQLite)
 ├── prometheus_engine.py    # Custom Prometheus query engine
+├── elasticsearch_engine.py # Custom Elasticsearch query engine
 ├── requirements.txt        # Python dependencies
+├── Dockerfile              # Docker container configuration
+├── docker-compose.yml      # Docker Compose orchestration
 ├── templates/
 │   └── index.html         # Frontend HTML
 ├── static/
@@ -159,6 +166,7 @@ jar/
 4. **Agent queries data sources**:
    - Oracle (via NLSQLTableQueryEngine) for configuration/thresholds
    - Prometheus (via custom engine) for real-time metrics
+   - Elasticsearch (via custom engine) for logs and error traces
 5. **Progress updates streamed** via WebSocket to frontend
 6. **Agent synthesizes response** combining all data sources
 7. **Natural language response** displayed to user
@@ -170,6 +178,7 @@ The pilot phase includes sample data:
 - Performance thresholds for each application
 - Historical incidents
 - Mock Prometheus metrics
+- Mock Elasticsearch logs and error traces
 
 ## Development
 
@@ -181,30 +190,44 @@ python app.py
 
 The app runs with Flask debug mode enabled by default.
 
+### Enabling Real Elasticsearch
+
+To use a real Elasticsearch instance instead of mock data:
+
+1. Uncomment the Elasticsearch service in [docker-compose.yml](docker-compose.yml)
+2. Uncomment the environment variables in the `jar` service
+3. Uncomment the `depends_on` section
+4. Modify [elasticsearch_engine.py](elasticsearch_engine.py) to connect to real Elasticsearch:
+   - Set `mock_mode=False`
+   - Implement `_query_elasticsearch_api()` method with actual Elasticsearch client calls
+5. Restart with `docker compose up --build`
+
 ### Extending Data Sources
 
-To add new data sources (e.g., Elasticsearch):
+To add new data sources:
 
-1. Create a custom query engine class (see `prometheus_engine.py` as example)
+1. Create a custom query engine class (see [prometheus_engine.py](prometheus_engine.py) or [elasticsearch_engine.py](elasticsearch_engine.py) as examples)
 2. Wrap it as a QueryEngineTool
-3. Add to agent in `agent.py`
+3. Add to agent in [agent.py](agent.py)
 
 ## Limitations (Pilot Phase)
 
-- Uses mock data for Prometheus (no actual Prometheus connection)
+- Uses mock data for Prometheus and Elasticsearch (no actual connections by default)
 - SQLite simulates Oracle database
-- Elasticsearch not yet implemented
 - Single-user (no authentication)
+- Mock data generation for logs and metrics
 
 ## Future Enhancements
 
 - [ ] Real Prometheus API integration
-- [ ] Elasticsearch query engine
+- [ ] Real Elasticsearch API integration (currently using mock data)
 - [ ] User authentication
 - [ ] Query history
 - [ ] Saved queries
 - [ ] Dashboard visualizations
 - [ ] Multi-tenancy support
+- [ ] Advanced log filtering and aggregation
+- [ ] Alerting based on query results
 
 ## License
 

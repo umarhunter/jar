@@ -10,13 +10,14 @@ from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.agent.openai import OpenAIAgent
 from llama_index.llms.openai import OpenAI
 from prometheus_engine import PrometheusQueryEngine
+from elasticsearch_engine import ElasticsearchQueryEngine
 from oracle_db import get_database_engine
 
 
 class ObservabilityAgent:
     """
     Main agent for natural language observability queries.
-    Orchestrates queries across Oracle and Prometheus data sources.
+    Orchestrates queries across Oracle, Prometheus, and Elasticsearch data sources.
     """
     
     def __init__(self, 
@@ -43,7 +44,8 @@ class ObservabilityAgent:
         # Initialize data sources
         self._setup_oracle_engine()
         self._setup_prometheus_engine()
-        
+        self._setup_elasticsearch_engine()
+
         # Create agent with tools
         self._setup_agent()
     
@@ -81,14 +83,27 @@ class ObservabilityAgent:
         """Set up custom Prometheus query engine."""
         self._emit_progress('setup', 'Initializing Prometheus query engine...', 'prometheus',
                            'Setting up connection to metrics database')
-        
+
         self.prometheus_query_engine = PrometheusQueryEngine(
             llm=self.llm,
             mock_mode=True  # Using mock data for pilot
         )
-        
+
         self._emit_progress('setup_complete', 'Prometheus query engine initialized', 'prometheus',
                            'Ready to query real-time metrics')
+
+    def _setup_elasticsearch_engine(self):
+        """Set up custom Elasticsearch query engine."""
+        self._emit_progress('setup', 'Initializing Elasticsearch query engine...', 'elasticsearch',
+                           'Setting up connection to logs database')
+
+        self.elasticsearch_query_engine = ElasticsearchQueryEngine(
+            llm=self.llm,
+            mock_mode=True  # Using mock data for pilot
+        )
+
+        self._emit_progress('setup_complete', 'Elasticsearch query engine initialized', 'elasticsearch',
+                           'Ready to query application logs and traces')
     
     def _setup_agent(self):
         """Set up the ReActAgent with query engine tools."""
@@ -131,21 +146,43 @@ class ObservabilityAgent:
                 )
             )
         )
-        
+
+        elasticsearch_tool = QueryEngineTool(
+            query_engine=self.elasticsearch_query_engine,
+            metadata=ToolMetadata(
+                name="elasticsearch_logs",
+                description=(
+                    "Query application logs and error traces from Elasticsearch. "
+                    "Use this to find:\n"
+                    "- Error logs and stack traces\n"
+                    "- Application log messages (INFO, WARN, ERROR, FATAL)\n"
+                    "- Recent errors and their details\n"
+                    "- Log patterns and trends\n"
+                    "- Error types and frequencies\n"
+                    "Supports time windows like 'last 30 minutes', 'past hour', 'today'.\n"
+                    "Examples: 'Show me recent errors', 'What errors occurred in the last hour?', "
+                    "'Are there any authentication failures?', 'Show logs for user-service'"
+                )
+            )
+        )
+
         # Create ReActAgent
         self.agent = OpenAIAgent.from_tools(
-            tools=[oracle_tool, prometheus_tool],
+            tools=[oracle_tool, prometheus_tool, elasticsearch_tool],
             llm=self.llm,
             verbose=self.verbose,
             system_prompt=(
                 "You are an observability assistant that helps users understand application health and performance.\n"
-                "You have access to two data sources:\n"
+                "You have access to three data sources:\n"
                 "1. Oracle database - contains application configurations, thresholds, and historical incidents\n"
-                "2. Prometheus - contains real-time performance metrics\n\n"
+                "2. Prometheus - contains real-time performance metrics (CPU, memory, requests, errors, latency)\n"
+                "3. Elasticsearch - contains application logs, error traces, and log-level messages\n\n"
                 "When answering questions about application performance:\n"
-                "- First check Oracle for thresholds and configuration\n"
-                "- Then check Prometheus for current metrics\n"
+                "- Check Oracle for thresholds and configuration\n"
+                "- Check Prometheus for current metrics\n"
+                "- Check Elasticsearch for detailed error logs and traces\n"
                 "- Compare metrics against thresholds\n"
+                "- Correlate metrics with log data to provide deeper insights\n"
                 "- Provide clear, actionable insights\n\n"
                 "Always synthesize information from multiple sources to give complete answers.\n"
                 "Use natural language and be helpful and concise."

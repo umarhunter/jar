@@ -15,6 +15,9 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       # Database path inside container
       - DATABASE_PATH=/app/data/oracle_pilot.db
+      # Optional: Elasticsearch connection (uncomment to use real Elasticsearch)
+      # - ELASTICSEARCH_HOST=elasticsearch
+      # - ELASTICSEARCH_PORT=9200
     volumes:
       # Persist database across container restarts
       - jar_data:/app/data
@@ -29,10 +32,38 @@ services:
       start_period: 40s
     networks:
       - jar-network
+    # Uncomment to depend on Elasticsearch
+    # depends_on:
+    #   - elasticsearch
+
+  # Uncomment this entire service to run a real Elasticsearch instance
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+  #   container_name: jar-elasticsearch
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=false
+  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+  #   ports:
+  #     - "9200:9200"
+  #     - "9300:9300"
+  #   volumes:
+  #     - elasticsearch_data:/usr/share/elasticsearch/data
+  #   networks:
+  #     - jar-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 60s
 
 volumes:
   jar_data:
     driver: local
+  # Uncomment to persist Elasticsearch data
+  # elasticsearch_data:
+  #   driver: local
 
 networks:
   jar-network:
