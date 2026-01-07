@@ -5,6 +5,7 @@ Uses FunctionAgent with workflow-based approach to orchestrate queries across mu
 import os
 import asyncio
 from typing import Any, Optional, Callable
+from sqlalchemy import text
 from llama_index.core import SQLDatabase
 from llama_index.core.query_engine import NLSQLTableQueryEngine
 from llama_index.core.tools import QueryEngineTool
@@ -50,6 +51,76 @@ class ObservabilityAgent:
 
         # Create agent with tools
         self._setup_agent()
+        
+        # Validate all connections are working
+        self._validate_connections()
+    
+    def _validate_connections(self):
+        """Validate that all data sources are properly initialized."""
+        self._emit_progress('validation', 'Validating data source connections...', None,
+                           'Checking all database connections are ready')
+        
+        issues = []
+        
+        # Check Oracle
+        if not hasattr(self, 'oracle_query_engine') or self.oracle_query_engine is None:
+            issues.append('Oracle database not initialized')
+        
+        # Check Prometheus
+        if not hasattr(self, 'prometheus_query_engine') or self.prometheus_query_engine is None:
+            issues.append('Prometheus query engine not initialized')
+        
+        # Check Elasticsearch
+        if not hasattr(self, 'elasticsearch_query_engine') or self.elasticsearch_query_engine is None:
+            issues.append('Elasticsearch query engine not initialized')
+        
+        # Check Agent
+        if not hasattr(self, 'agent') or self.agent is None:
+            issues.append('Agent not initialized')
+        
+        if issues:
+            error_msg = 'Initialization issues: ' + ', '.join(issues)
+            self._emit_progress('validation_error', error_msg, None,
+                               'One or more components failed to initialize')
+            raise RuntimeError(error_msg)
+        
+        self._emit_progress('validation_complete', 'All data sources validated and ready', None,
+                           'System is ready to process queries')
+    
+    def test_connections(self) -> dict:
+        """
+        Test all data source connections without making OpenAI calls.
+        
+        Returns:
+            Dictionary with connection status for each data source
+        """
+        status = {
+            'oracle': {'connected': False, 'error': None},
+            'prometheus': {'connected': False, 'mode': None, 'error': None},
+            'elasticsearch': {'connected': False, 'mode': None, 'error': None}
+        }
+        
+        # Test Oracle
+        try:
+            engine = get_database_engine()
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT COUNT(*) FROM applications"))
+                if result.fetchone():
+                    status['oracle']['connected'] = True
+        except Exception as e:
+            status['oracle']['error'] = str(e)
+        
+        # Test Prometheus
+        if hasattr(self, 'prometheus_query_engine'):
+            status['prometheus']['connected'] = True
+            status['prometheus']['mode'] = 'mock' if self.prometheus_query_engine.mock_mode else 'live'
+        
+        # Test Elasticsearch
+        if hasattr(self, 'elasticsearch_query_engine'):
+            status['elasticsearch']['connected'] = True
+            status['elasticsearch']['mode'] = 'mock' if self.elasticsearch_query_engine.mock_mode else 'live'
+        
+        return status
     
     def _emit_progress(self, step: str, message: str, source: Optional[str] = None, reasoning: str = ""):
         """Emit progress update if callback is provided."""
@@ -66,20 +137,30 @@ class ObservabilityAgent:
         self._emit_progress('setup', 'Initializing Oracle database connection...', 'oracle',
                            'Setting up connection to configuration database')
         
-        # Get database engine
-        engine = get_database_engine()
-        sql_database = SQLDatabase(engine)
-        
-        # Create NL to SQL query engine
-        self.oracle_query_engine = NLSQLTableQueryEngine(
-            sql_database=sql_database,
-            tables=['applications', 'performance_thresholds', 'incidents'],
-            llm=self.llm,
-            verbose=self.verbose
-        )
-        
-        self._emit_progress('setup_complete', 'Oracle database connection established', 'oracle',
-                           'Ready to query application configurations and thresholds')
+        try:
+            # Get database engine
+            engine = get_database_engine()
+            sql_database = SQLDatabase(engine)
+            
+            # Test the connection by running a simple query
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT 1"))
+                result.fetchone()
+            
+            # Create NL to SQL query engine
+            self.oracle_query_engine = NLSQLTableQueryEngine(
+                sql_database=sql_database,
+                tables=['applications', 'performance_thresholds', 'incidents'],
+                llm=self.llm,
+                verbose=self.verbose
+            )
+            
+            self._emit_progress('setup_complete', 'Oracle database connection established', 'oracle',
+                               'Ready to query application configurations and thresholds')
+        except Exception as e:
+            self._emit_progress('setup_error', f'Failed to initialize Oracle database: {e}', 'oracle',
+                               'Could not establish database connection')
+            raise RuntimeError(f"Oracle database initialization failed: {e}")
     
     def _setup_prometheus_engine(self):
         """Set up custom Prometheus query engine."""
@@ -205,8 +286,18 @@ class ObservabilityAgent:
         
         try:
             # Execute query through agent using workflow API
-            handler = self.agent.run(user_query, ctx=self.ctx)
-            response = asyncio.run(handler)
+            # The workflow needs to run in a new event loop since Flask-SocketIO is synchronous
+            async def run_query():
+                handler = self.agent.run(user_query, ctx=self.ctx)
+                return await handler
+            
+            # Run in a new event loop (works with Flask-SocketIO threading mode)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                response = loop.run_until_complete(run_query())
+            finally:
+                loop.close()
             
             self._emit_progress('complete', 'Query processing complete', None,
                                'Successfully synthesized response from all relevant data sources')
@@ -214,8 +305,17 @@ class ObservabilityAgent:
             return str(response)
             
         except Exception as e:
-            self._emit_progress('error', f'Error processing query: {str(e)}', None,
-                               'An unexpected error occurred during query processing')
+            error_msg = str(e)
+            # Provide more helpful error messages
+            if 'Connection error' in error_msg or 'ConnectError' in error_msg:
+                error_msg = 'Failed to connect to OpenAI API. Please check your internet connection and API key.'
+            elif 'insufficient_quota' in error_msg:
+                error_msg = 'OpenAI API quota exceeded. Please add credits to your account.'
+            elif 'invalid_api_key' in error_msg:
+                error_msg = 'Invalid OpenAI API key. Please check your OPENAI_API_KEY environment variable.'
+            
+            self._emit_progress('error', f'Error processing query: {error_msg}', None,
+                               'An error occurred during query processing')
             raise
     
     def reset(self):

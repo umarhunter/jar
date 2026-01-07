@@ -51,7 +51,7 @@ class PrometheusQueryEngine(CustomQueryEngine):
             prometheus_url: URL of Prometheus server (default: http://prometheus:9090 or env PROMETHEUS_URL)
         """
         if prometheus_url is None:
-            prometheus_url = os.getenv('PROMETHEUS_URL', 'http://prometheus:9090')
+            prometheus_url = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
 
         super().__init__(llm=llm, mock_mode=mock_mode, prometheus_url=prometheus_url, **kwargs)
 

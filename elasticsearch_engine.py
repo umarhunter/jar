@@ -62,7 +62,7 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
             index_pattern: Index pattern to search (default: logs-*)
         """
         if elasticsearch_host is None:
-            elasticsearch_host = os.getenv('ELASTICSEARCH_HOST', 'http://elasticsearch:9200')
+            elasticsearch_host = os.getenv('ELASTICSEARCH_HOST', 'http://localhost:9200')
 
         super().__init__(llm=llm, mock_mode=mock_mode, elasticsearch_host=elasticsearch_host, index_pattern=index_pattern, **kwargs)
 
