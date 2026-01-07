@@ -20,13 +20,12 @@ scrape_configs:
           instance: 'jar-node'
           environment: 'production'
 
-  # JAR Application (if it exposes metrics endpoint in the future)
+  # JAR Application - Flask app metrics
   - job_name: 'jar-app'
     static_configs:
-      - targets: ['jar:5000']
+      - targets: ['jar:5001']
         labels:
           application: 'jar'
           environment: 'production'
     metrics_path: '/metrics'
-    # This will fail until metrics endpoint is implemented, but won't break Prometheus
     scrape_timeout: 5s

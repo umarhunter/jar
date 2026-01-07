@@ -1,13 +1,15 @@
 """
 LlamaIndex Agent for Natural Language Observability Queries.
-Uses ReActAgent to orchestrate queries across multiple data sources.
+Uses FunctionAgent with workflow-based approach to orchestrate queries across multiple data sources.
 """
 import os
+import asyncio
 from typing import Any, Optional, Callable
 from llama_index.core import SQLDatabase
 from llama_index.core.query_engine import NLSQLTableQueryEngine
-from llama_index.core.tools import QueryEngineTool, ToolMetadata
-from llama_index.agent.openai import OpenAIAgent
+from llama_index.core.tools import QueryEngineTool
+from llama_index.core.agent.workflow import FunctionAgent
+from llama_index.core.workflow import Context
 from llama_index.llms.openai import OpenAI
 from prometheus_engine import PrometheusQueryEngine
 from elasticsearch_engine import ElasticsearchQueryEngine
@@ -106,71 +108,64 @@ class ObservabilityAgent:
                            'Ready to query application logs and traces')
     
     def _setup_agent(self):
-        """Set up the ReActAgent with query engine tools."""
+        """Set up the FunctionAgent with query engine tools."""
         self._emit_progress('setup', 'Creating agent with multi-tool orchestration...', None,
-                           'Setting up ReActAgent to coordinate queries across data sources')
+                           'Setting up FunctionAgent to coordinate queries across data sources')
         
-        # Wrap engines as tools
-        oracle_tool = QueryEngineTool(
+        # Wrap engines as tools using from_defaults
+        oracle_tool = QueryEngineTool.from_defaults(
             query_engine=self.oracle_query_engine,
-            metadata=ToolMetadata(
-                name="oracle_config",
-                description=(
-                    "Query application configuration, performance thresholds, and historical incidents. "
-                    "Use this to find:\n"
-                    "- What applications are being monitored\n"
-                    "- Performance thresholds (CPU, memory, response time, error rate limits)\n"
-                    "- Historical incidents and their resolution\n"
-                    "- Application metadata (owner, environment, description)\n"
-                    "Examples: 'What applications are monitored?', 'What is the CPU threshold for user-service?', "
-                    "'Show me recent incidents'"
-                )
+            name="oracle_config",
+            description=(
+                "Query application configuration, performance thresholds, and historical incidents. "
+                "Use this to find:\n"
+                "- What applications are being monitored\n"
+                "- Performance thresholds (CPU, memory, response time, error rate limits)\n"
+                "- Historical incidents and their resolution\n"
+                "- Application metadata (owner, environment, description)\n"
+                "Examples: 'What applications are monitored?', 'What is the CPU threshold for user-service?', "
+                "'Show me recent incidents'"
             )
         )
         
-        prometheus_tool = QueryEngineTool(
+        prometheus_tool = QueryEngineTool.from_defaults(
             query_engine=self.prometheus_query_engine,
-            metadata=ToolMetadata(
-                name="prometheus_metrics",
-                description=(
-                    "Query real-time performance metrics from Prometheus. "
-                    "Use this to get current:\n"
-                    "- CPU usage (percentage)\n"
-                    "- Memory usage (percentage)\n"
-                    "- Request rates (requests per second)\n"
-                    "- Error counts and rates\n"
-                    "- Response times and latency\n"
-                    "Supports time windows like 'right now', 'last 30 minutes', 'past hour'.\n"
-                    "Examples: 'What is the CPU usage?', 'How many errors in the last 30 minutes?', "
-                    "'What is the current memory usage?'"
-                )
+            name="prometheus_metrics",
+            description=(
+                "Query real-time performance metrics from Prometheus. "
+                "Use this to get current:\n"
+                "- CPU usage (percentage)\n"
+                "- Memory usage (percentage)\n"
+                "- Request rates (requests per second)\n"
+                "- Error counts and rates\n"
+                "- Response times and latency\n"
+                "Supports time windows like 'right now', 'last 30 minutes', 'past hour'.\n"
+                "Examples: 'What is the CPU usage?', 'How many errors in the last 30 minutes?', "
+                "'What is the current memory usage?'"
             )
         )
 
-        elasticsearch_tool = QueryEngineTool(
+        elasticsearch_tool = QueryEngineTool.from_defaults(
             query_engine=self.elasticsearch_query_engine,
-            metadata=ToolMetadata(
-                name="elasticsearch_logs",
-                description=(
-                    "Query application logs and error traces from Elasticsearch. "
-                    "Use this to find:\n"
-                    "- Error logs and stack traces\n"
-                    "- Application log messages (INFO, WARN, ERROR, FATAL)\n"
-                    "- Recent errors and their details\n"
-                    "- Log patterns and trends\n"
-                    "- Error types and frequencies\n"
-                    "Supports time windows like 'last 30 minutes', 'past hour', 'today'.\n"
-                    "Examples: 'Show me recent errors', 'What errors occurred in the last hour?', "
-                    "'Are there any authentication failures?', 'Show logs for user-service'"
-                )
+            name="elasticsearch_logs",
+            description=(
+                "Query application logs and error traces from Elasticsearch. "
+                "Use this to find:\n"
+                "- Error logs and stack traces\n"
+                "- Application log messages (INFO, WARN, ERROR, FATAL)\n"
+                "- Recent errors and their details\n"
+                "- Log patterns and trends\n"
+                "- Error types and frequencies\n"
+                "Supports time windows like 'last 30 minutes', 'past hour', 'today'.\n"
+                "Examples: 'Show me recent errors', 'What errors occurred in the last hour?', "
+                "'Are there any authentication failures?', 'Show logs for user-service'"
             )
         )
 
-        # Create ReActAgent
-        self.agent = OpenAIAgent.from_tools(
+        # Create FunctionAgent with workflow approach
+        self.agent = FunctionAgent(
             tools=[oracle_tool, prometheus_tool, elasticsearch_tool],
             llm=self.llm,
-            verbose=self.verbose,
             system_prompt=(
                 "You are an observability assistant that helps users understand application health and performance.\n"
                 "You have access to three data sources:\n"
@@ -189,6 +184,9 @@ class ObservabilityAgent:
             )
         )
         
+        # Create workflow context
+        self.ctx = Context(self.agent)
+        
         self._emit_progress('setup_complete', 'Agent ready to process queries', None,
                            'All data sources connected and agent is operational')
     
@@ -206,8 +204,9 @@ class ObservabilityAgent:
                            'Analyzing query and determining which data sources to consult')
         
         try:
-            # Execute query through agent
-            response = self.agent.chat(user_query)
+            # Execute query through agent using workflow API
+            handler = self.agent.run(user_query, ctx=self.ctx)
+            response = asyncio.run(handler)
             
             self._emit_progress('complete', 'Query processing complete', None,
                                'Successfully synthesized response from all relevant data sources')
@@ -221,6 +220,7 @@ class ObservabilityAgent:
     
     def reset(self):
         """Reset agent conversation history."""
-        self.agent.reset()
+        # Recreate context for fresh conversation
+        self.ctx = Context(self.agent)
         self._emit_progress('reset', 'Agent conversation reset', None,
                            'Cleared conversation history for new query session')

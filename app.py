@@ -4,17 +4,21 @@ Integrates LlamaIndex agent with WebSocket progress streaming.
 """
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
-import eventlet
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
+from prometheus_client import make_wsgi_app
+import asyncio
 import os
 from agent import ObservabilityAgent
-
-# Monkey patch for eventlet
-eventlet.monkey_patch()
 
 app = Flask(__name__)
 # Use environment variable for secret key, with secure random fallback for development
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Add Prometheus metrics endpoint
+app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {
+    '/metrics': make_wsgi_app()
+})
 
 # Global agent instance
 agent = None
@@ -23,7 +27,6 @@ agent = None
 def progress_callback(progress_data):
     """Callback function to emit progress updates via WebSocket."""
     socketio.emit('progress', progress_data)
-    eventlet.sleep(0)  # Allow other greenlets to run
 
 
 @app.route('/')
@@ -161,4 +164,4 @@ if __name__ == '__main__':
     print("Set OPENAI_API_KEY environment variable to use the agent")
     print("="*60 + "\n")
     
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5001)

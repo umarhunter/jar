@@ -6,7 +6,7 @@ from typing import Any, Optional, List, Dict
 from llama_index.core.query_engine import CustomQueryEngine
 from llama_index.core.prompts import PromptTemplate
 from llama_index.llms.openai import OpenAI
-from elasticsearch import Elasticsearch
+import requests
 import json
 import random
 import os
@@ -46,7 +46,7 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
 
     llm: OpenAI
     mock_mode: bool = False  # Use real Elasticsearch by default
-    es_client: Optional[Elasticsearch] = None
+    elasticsearch_host: str = ""
     index_pattern: str = "logs-*"
 
     def __init__(self, llm: OpenAI, mock_mode: bool = False,
@@ -64,21 +64,19 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         if elasticsearch_host is None:
             elasticsearch_host = os.getenv('ELASTICSEARCH_HOST', 'http://elasticsearch:9200')
 
-        super().__init__(llm=llm, mock_mode=mock_mode, index_pattern=index_pattern, **kwargs)
+        super().__init__(llm=llm, mock_mode=mock_mode, elasticsearch_host=elasticsearch_host, index_pattern=index_pattern, **kwargs)
 
-        # Initialize Elasticsearch client if not in mock mode
+        # Test Elasticsearch connection if not in mock mode
         if not mock_mode:
             try:
-                self.es_client = Elasticsearch([elasticsearch_host])
-                # Test connection
-                if self.es_client.ping():
-                    print(f"✅ Connected to Elasticsearch at {elasticsearch_host}")
+                response = requests.get(f"{elasticsearch_host}/_cluster/health", timeout=5)
+                if response.status_code == 200:
+                    print(f"Connected to Elasticsearch at {elasticsearch_host}")
                 else:
-                    print(f"⚠️ Elasticsearch at {elasticsearch_host} is not responding")
-                    print("Falling back to mock mode")
+                    print(f"Warning: Elasticsearch returned status {response.status_code}, falling back to mock mode")
                     self.mock_mode = True
             except Exception as e:
-                print(f"⚠️ Failed to connect to Elasticsearch at {elasticsearch_host}: {e}")
+                print(f"Warning: Failed to connect to Elasticsearch at {elasticsearch_host}: {e}")
                 print("Falling back to mock mode")
                 self.mock_mode = True
 
@@ -213,11 +211,7 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         application: str,
         search_terms: List[str]
     ) -> Dict:
-        """Query actual Elasticsearch API."""
-        if not self.es_client:
-            print("⚠️ Elasticsearch client not initialized, using mock data")
-            return self._mock_elasticsearch_query(query_type, time_window, log_level, application, search_terms)
-
+        """Query actual Elasticsearch API using HTTP requests."""
         try:
             # Build Elasticsearch query
             query_body = {
@@ -268,12 +262,17 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
                         }
                     })
 
-            # Execute search
-            response = self.es_client.search(index=self.index_pattern, body=query_body)
+            # Execute search via HTTP API
+            url = f"{self.elasticsearch_host}/{self.index_pattern}/_search"
+            headers = {"Content-Type": "application/json"}
+            response = requests.post(url, json=query_body, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
 
             # Parse results
-            hits = response.get('hits', {}).get('hits', [])
-            total_logs = response.get('hits', {}).get('total', {}).get('value', 0)
+            hits = data.get('hits', {}).get('hits', [])
+            total_logs = data.get('hits', {}).get('total', {}).get('value', 0)
 
             # Aggregate log levels
             log_counts = {"ERROR": 0, "WARN": 0, "INFO": 0}
@@ -308,8 +307,8 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
                 'timestamp': datetime.now().isoformat()
             }
 
-        except Exception as e:
-            print(f"⚠️ Error querying Elasticsearch: {e}")
+        except requests.RequestException as e:
+            print(f"Warning: Error querying Elasticsearch API: {e}")
             return {
                 'total_logs': 0,
                 'time_range': f'Last {time_window} minutes',
@@ -318,7 +317,19 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
                 'traces': [],
                 'applications_affected': [],
                 'timestamp': datetime.now().isoformat(),
-                'error': str(e)
+                'error': f'Request failed: {str(e)}'
+            }
+        except (ValueError, KeyError) as e:
+            print(f"Warning: Error parsing Elasticsearch response: {e}")
+            return {
+                'total_logs': 0,
+                'time_range': f'Last {time_window} minutes',
+                'log_counts': {'ERROR': 0, 'WARN': 0, 'INFO': 0},
+                'recent_errors': [],
+                'traces': [],
+                'applications_affected': [],
+                'timestamp': datetime.now().isoformat(),
+                'error': f'Parse error: {str(e)}'
             }
 
     def _generate_summary(self, results: Dict, query_type: str, log_level: str) -> str:
@@ -334,14 +345,14 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         summary_parts = []
 
         # Add time range
-        summary_parts.append(f"📊 {time_range}")
+        summary_parts.append(f"{time_range}")
 
         # Add log counts
         summary_parts.append(f"Total logs: {total_logs}")
 
         # Error analysis
         if error_count > 0:
-            summary_parts.append(f"⚠️ {error_count} errors detected")
+            summary_parts.append(f"{error_count} errors detected")
 
             # Add error breakdown
             if recent_errors:
@@ -353,11 +364,11 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
                 top_errors = sorted(error_breakdown.items(), key=lambda x: x[1], reverse=True)[:3]
                 summary_parts.append("Top errors: " + ", ".join([f"{err[0]} ({err[1]}x)" for err in top_errors]))
         else:
-            summary_parts.append("✅ No errors detected")
+            summary_parts.append("No errors detected")
 
         # Warning analysis
         if warn_count > 0:
-            summary_parts.append(f"⚡ {warn_count} warnings")
+            summary_parts.append(f"{warn_count} warnings")
 
         # Affected applications
         apps = results.get('applications_affected', [])

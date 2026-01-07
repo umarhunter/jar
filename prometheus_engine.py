@@ -6,7 +6,7 @@ from typing import Any, Optional
 from llama_index.core.query_engine import CustomQueryEngine
 from llama_index.core import PromptTemplate
 from llama_index.llms.openai import OpenAI
-from prometheus_api_client import PrometheusConnect
+import requests
 import json
 import random
 import os
@@ -40,7 +40,6 @@ class PrometheusQueryEngine(CustomQueryEngine):
     llm: OpenAI
     mock_mode: bool = False  # Use real Prometheus by default
     prometheus_url: str = ""
-    prom_client: Optional[PrometheusConnect] = None
 
     def __init__(self, llm: OpenAI, mock_mode: bool = False, prometheus_url: Optional[str] = None, **kwargs):
         """
@@ -56,13 +55,17 @@ class PrometheusQueryEngine(CustomQueryEngine):
 
         super().__init__(llm=llm, mock_mode=mock_mode, prometheus_url=prometheus_url, **kwargs)
 
-        # Initialize Prometheus client if not in mock mode
+        # Test Prometheus connection if not in mock mode
         if not mock_mode:
             try:
-                self.prom_client = PrometheusConnect(url=prometheus_url, disable_ssl=True)
-                print(f"✅ Connected to Prometheus at {prometheus_url}")
+                response = requests.get(f"{prometheus_url}/api/v1/status/config", timeout=5)
+                if response.status_code == 200:
+                    print(f"Connected to Prometheus at {prometheus_url}")
+                else:
+                    print(f"Warning: Prometheus returned status {response.status_code}, falling back to mock mode")
+                    self.mock_mode = True
             except Exception as e:
-                print(f"⚠️ Failed to connect to Prometheus at {prometheus_url}: {e}")
+                print(f"Warning: Failed to connect to Prometheus at {prometheus_url}: {e}")
                 print("Falling back to mock mode")
                 self.mock_mode = True
     
@@ -165,16 +168,37 @@ class PrometheusQueryEngine(CustomQueryEngine):
             }
     
     def _query_prometheus_api(self, promql: str, time_window: str) -> dict:
-        """Query actual Prometheus API."""
-        if not self.prom_client:
-            print("⚠️ Prometheus client not initialized, using mock data")
-            return self._mock_prometheus_query(promql, 'unknown', time_window)
-
+        """Query actual Prometheus API using HTTP requests."""
         try:
-            # Query Prometheus
-            result = self.prom_client.custom_query(query=promql)
-
-            if not result:
+            # Build the query URL
+            url = f"{self.prometheus_url}/api/v1/query"
+            params = {"query": promql}
+            
+            # Add time parameter if it's a range query
+            if time_window != 'current':
+                # For instant queries, we use the current time
+                pass
+            
+            # Make the request
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get("status") != "success":
+                error_msg = data.get("error", "Unknown error")
+                print(f"Warning: Prometheus query failed: {error_msg}")
+                return {
+                    'metric': 'error',
+                    'value': 0,
+                    'unit': '',
+                    'timestamp': datetime.now().isoformat(),
+                    'error': error_msg
+                }
+            
+            results = data.get("data", {}).get("result", [])
+            
+            if not results:
                 return {
                     'metric': 'no_data',
                     'value': 0,
@@ -182,52 +206,54 @@ class PrometheusQueryEngine(CustomQueryEngine):
                     'timestamp': datetime.now().isoformat(),
                     'error': 'No data returned from Prometheus'
                 }
-
+            
             # Parse the first result (simplification - could handle multiple series)
-            if len(result) > 0:
-                metric_data = result[0]
-                metric_name = metric_data.get('metric', {}).get('__name__', 'unknown')
-                value_data = metric_data.get('value', [None, 0])
-
-                # value_data is [timestamp, value]
-                timestamp = datetime.fromtimestamp(float(value_data[0])) if value_data[0] else datetime.now()
-                value = float(value_data[1]) if len(value_data) > 1 else 0.0
-
-                # Determine unit and metric type from metric name
-                unit = ''
-                if 'percent' in metric_name or 'usage' in metric_name:
-                    unit = '%'
-                elif 'bytes' in metric_name:
-                    unit = 'B'
-                elif 'seconds' in metric_name:
-                    unit = 's'
-                elif 'total' in metric_name:
-                    unit = 'count'
-
-                return {
-                    'metric': metric_name,
-                    'value': value,
-                    'unit': unit,
-                    'timestamp': timestamp.isoformat(),
-                    'labels': metric_data.get('metric', {}),
-                    'promql': promql
-                }
-            else:
-                return {
-                    'metric': 'empty_result',
-                    'value': 0,
-                    'unit': '',
-                    'timestamp': datetime.now().isoformat()
-                }
-
-        except Exception as e:
-            print(f"⚠️ Error querying Prometheus: {e}")
+            metric_data = results[0]
+            metric_labels = metric_data.get('metric', {})
+            metric_name = metric_labels.get('__name__', 'unknown')
+            value_data = metric_data.get('value', [None, '0'])
+            
+            # value_data is [timestamp, value]
+            timestamp = datetime.fromtimestamp(float(value_data[0])) if value_data[0] else datetime.now()
+            value = float(value_data[1]) if len(value_data) > 1 else 0.0
+            
+            # Determine unit from metric name
+            unit = ''
+            if 'percent' in metric_name or 'usage' in metric_name:
+                unit = '%'
+            elif 'bytes' in metric_name:
+                unit = 'B'
+            elif 'seconds' in metric_name:
+                unit = 's'
+            elif 'total' in metric_name:
+                unit = 'count'
+            
+            return {
+                'metric': metric_name,
+                'value': value,
+                'unit': unit,
+                'timestamp': timestamp.isoformat(),
+                'labels': metric_labels,
+                'promql': promql
+            }
+            
+        except requests.RequestException as e:
+            print(f"Warning: Error querying Prometheus API: {e}")
             return {
                 'metric': 'error',
                 'value': 0,
                 'unit': '',
                 'timestamp': datetime.now().isoformat(),
-                'error': str(e)
+                'error': f'Request failed: {str(e)}'
+            }
+        except (ValueError, KeyError, IndexError) as e:
+            print(f"Warning: Error parsing Prometheus response: {e}")
+            return {
+                'metric': 'error',
+                'value': 0,
+                'unit': '',
+                'timestamp': datetime.now().isoformat(),
+                'error': f'Parse error: {str(e)}'
             }
     
     def _generate_summary(self, results: dict, metric_type: str) -> str:
@@ -239,38 +265,38 @@ class PrometheusQueryEngine(CustomQueryEngine):
         
         if metric_type == 'cpu':
             if value > 80:
-                return f"⚠️ High CPU usage detected: {value:.1f}{unit}"
+                return f"High CPU usage detected: {value:.1f}{unit}"
             elif value > 60:
                 return f"CPU usage is moderate: {value:.1f}{unit}"
             else:
-                return f"✅ CPU usage is normal: {value:.1f}{unit}"
+                return f"CPU usage is normal: {value:.1f}{unit}"
         
         elif metric_type == 'memory':
             if value > 85:
-                return f"⚠️ High memory usage detected: {value:.1f}{unit}"
+                return f"High memory usage detected: {value:.1f}{unit}"
             elif value > 70:
                 return f"Memory usage is moderate: {value:.1f}{unit}"
             else:
-                return f"✅ Memory usage is normal: {value:.1f}{unit}"
+                return f"Memory usage is normal: {value:.1f}{unit}"
         
         elif metric_type == 'errors':
             error_count = int(value)
             if error_count > 20:
                 error_details = results.get('recent_errors', [])
                 error_breakdown = ", ".join([f"{e['code']} ({e['count']})" for e in error_details])
-                return f"⚠️ {error_count} errors detected. Breakdown: {error_breakdown}"
+                return f"{error_count} errors detected. Breakdown: {error_breakdown}"
             elif error_count > 0:
                 return f"Minor errors detected: {error_count} total"
             else:
-                return f"✅ No errors detected"
+                return f"No errors detected"
         
         elif metric_type == 'latency':
             if value > 500:
-                return f"⚠️ High response time: {value:.1f}{unit}"
+                return f"High response time: {value:.1f}{unit}"
             elif value > 300:
                 return f"Response time is acceptable: {value:.1f}{unit}"
             else:
-                return f"✅ Response time is good: {value:.1f}{unit}"
+                return f"Response time is good: {value:.1f}{unit}"
         
         else:
             return f"Metric {metric}: {value}{unit}"
