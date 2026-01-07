@@ -46,10 +46,12 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
     llm: OpenAI
     elasticsearch_host: str = ""
     index_pattern: str = "application_logs"
+    progress_callback: Any = None
 
     def __init__(self, llm: OpenAI,
                  elasticsearch_host: Optional[str] = None,
-                 index_pattern: str = "application_logs", **kwargs):
+                 index_pattern: str = "application_logs",
+                 progress_callback: Any = None, **kwargs):
         """
         Initialize Elasticsearch query engine.
 
@@ -57,11 +59,12 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
             llm: OpenAI LLM instance
             elasticsearch_host: Elasticsearch host (default: http://localhost:9200 or env ELASTICSEARCH_HOST)
             index_pattern: Index pattern to search (default: logs-*)
+            progress_callback: Optional callback for progress updates
         """
         if elasticsearch_host is None:
             elasticsearch_host = os.getenv('ELASTICSEARCH_HOST', 'http://localhost:9200')
 
-        super().__init__(llm=llm, elasticsearch_host=elasticsearch_host, index_pattern=index_pattern, **kwargs)
+        super().__init__(llm=llm, elasticsearch_host=elasticsearch_host, index_pattern=index_pattern, progress_callback=progress_callback, **kwargs)
 
         # Test Elasticsearch connection
         try:
@@ -73,12 +76,28 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Elasticsearch at {elasticsearch_host}: {e}")
 
+    def _emit_progress(self, step: str, message: str, reasoning: str = ""):
+        """Emit progress update if callback is provided."""
+        if self.progress_callback:
+            self.progress_callback({
+                'step': step,
+                'message': message,
+                'source': 'elasticsearch',
+                'reasoning': reasoning
+            })
+
     def custom_query(self, query_str: str) -> Any:
         """Execute a query against Elasticsearch."""
+
+        self._emit_progress('query_start', 'Querying Elasticsearch logs...',
+                           'Analyzing query and building Elasticsearch DSL')
 
         # Step 1: Parse natural language to Elasticsearch query parameters
         prompt = ELASTICSEARCH_QUERY_PROMPT.format(query_str=query_str)
         response = self.llm.complete(prompt)
+
+        self._emit_progress('query_parsed', 'Query parameters extracted',
+                           'Built Elasticsearch query structure')
 
         try:
             # Parse the LLM response
@@ -106,9 +125,14 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
             search_terms = []
 
         # Step 2: Execute the Elasticsearch query
+        self._emit_progress('executing_query', f'Searching {log_level} logs...',
+                           f'Querying Elasticsearch for {query_type}')
         results = self._query_elasticsearch_api(
             query_type, time_window, log_level, application, search_terms
         )
+
+        self._emit_progress('query_complete', 'Elasticsearch query complete',
+                           f'Found {results.get("total_logs", 0)} log entries')
 
         # Step 3: Format results for the agent
         return {

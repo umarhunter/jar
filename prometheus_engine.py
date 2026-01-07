@@ -38,19 +38,21 @@ class PrometheusQueryEngine(CustomQueryEngine):
 
     llm: OpenAI
     prometheus_url: str = ""
+    progress_callback: Any = None
 
-    def __init__(self, llm: OpenAI, prometheus_url: Optional[str] = None, **kwargs):
+    def __init__(self, llm: OpenAI, prometheus_url: Optional[str] = None, progress_callback: Any = None, **kwargs):
         """
         Initialize Prometheus query engine.
 
         Args:
             llm: OpenAI LLM instance
             prometheus_url: URL of Prometheus server (default: http://localhost:9090 or env PROMETHEUS_URL)
+            progress_callback: Optional callback for progress updates
         """
         if prometheus_url is None:
             prometheus_url = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
 
-        super().__init__(llm=llm, prometheus_url=prometheus_url, **kwargs)
+        super().__init__(llm=llm, prometheus_url=prometheus_url, progress_callback=progress_callback, **kwargs)
 
         # Test Prometheus connection
         try:
@@ -62,12 +64,28 @@ class PrometheusQueryEngine(CustomQueryEngine):
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Prometheus at {prometheus_url}: {e}")
     
+    def _emit_progress(self, step: str, message: str, reasoning: str = ""):
+        """Emit progress update if callback is provided."""
+        if self.progress_callback:
+            self.progress_callback({
+                'step': step,
+                'message': message,
+                'source': 'prometheus',
+                'reasoning': reasoning
+            })
+
     def custom_query(self, query_str: str) -> Any:
         """Execute a query against Prometheus."""
-        
+
+        self._emit_progress('query_start', 'Querying Prometheus metrics...',
+                           'Translating natural language to PromQL')
+
         # Step 1: Generate PromQL from natural language
         prompt = PROMQL_GENERATION_PROMPT.format(query_str=query_str)
         response = self.llm.complete(prompt)
+
+        self._emit_progress('promql_generated', 'Generated PromQL query',
+                           'Received PromQL from language model')
         
         try:
             # Parse the LLM response
@@ -103,8 +121,13 @@ class PrometheusQueryEngine(CustomQueryEngine):
             }
         
         # Step 2: Execute the PromQL query
+        self._emit_progress('executing_query', f'Executing PromQL: {promql[:50]}...',
+                           'Querying Prometheus API')
         results = self._query_prometheus_api(promql, time_window)
-        
+
+        self._emit_progress('query_complete', 'Prometheus query complete',
+                           'Successfully retrieved metrics data')
+
         # Step 3: Format results for the agent
         return {
             'query': query_str,

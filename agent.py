@@ -170,7 +170,8 @@ class ObservabilityAgent:
                            'Setting up connection to metrics database')
 
         self.prometheus_query_engine = PrometheusQueryEngine(
-            llm=self.llm
+            llm=self.llm,
+            progress_callback=self.progress_callback
         )
 
         self._emit_progress('setup_complete', 'Prometheus query engine initialized', 'prometheus',
@@ -182,7 +183,8 @@ class ObservabilityAgent:
                            'Setting up connection to logs database')
 
         self.elasticsearch_query_engine = ElasticsearchQueryEngine(
-            llm=self.llm
+            llm=self.llm,
+            progress_callback=self.progress_callback
         )
 
         self._emit_progress('setup_complete', 'Elasticsearch query engine initialized', 'elasticsearch',

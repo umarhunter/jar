@@ -31,6 +31,8 @@ agent = None
 def progress_callback(progress_data):
     """Callback function to emit progress updates via WebSocket."""
     socketio.emit('progress', progress_data)
+    # Force immediate flush in threading mode
+    socketio.sleep(0)
 
 
 @app.route('/')
