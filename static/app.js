@@ -243,7 +243,7 @@ function formatResponse(response) {
 }
 
 function escapeHtml(text) {
-    // More robust HTML escaping for security
+    // Comprehensive HTML escaping for XSS protection
     const map = {
         '&': '&amp;',
         '<': '&lt;',
@@ -251,8 +251,9 @@ function escapeHtml(text) {
         '"': '&quot;',
         "'": '&#x27;',
         '/': '&#x2F;',
+        '`': '&#x60;',
     };
-    return String(text).replace(/[&<>"'/]/g, (s) => map[s]);
+    return String(text).replace(/[&<>"'/`]/g, (s) => map[s]);
 }
 
 function showNotification(message, type) {
@@ -274,5 +275,6 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Initialize
-console.log('JAR Client initialized');
+// Initialize JAR Natural Language Observability Client
+// Components: Socket.IO connection, event handlers, UI state management
+console.log('JAR Client initialized - WebSocket connection and event listeners configured');

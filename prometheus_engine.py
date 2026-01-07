@@ -62,7 +62,8 @@ class PrometheusQueryEngine(CustomQueryEngine):
             metric_type = query_info.get('metric_type', 'unknown')
             
         except (json.JSONDecodeError, ValueError, KeyError, AttributeError) as e:
-            # Fallback if parsing fails
+            # Fallback if parsing fails - log the error for debugging
+            print(f"Warning: Failed to parse PromQL generation response: {e}")
             promql = "up{}"
             time_window = 'current'
             metric_type = 'unknown'
