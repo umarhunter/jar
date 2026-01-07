@@ -16,18 +16,18 @@ PROMQL_GENERATION_PROMPT = PromptTemplate(
     "You are an expert in Prometheus and PromQL.\n"
     "Given a natural language query about metrics, generate the appropriate PromQL query.\n"
     "Focus on these metric types:\n"
-    "- CPU usage: cpu_usage_percent, node_cpu_seconds_total\n"
-    "- Memory usage: memory_usage_percent, node_memory_MemAvailable_bytes\n"
+    "- CPU usage: Use rate(node_cpu_seconds_total{mode!='idle'}[5m]) for non-idle CPU\n"
+    "- Memory usage: node_memory_MemAvailable_bytes, node_memory_MemTotal_bytes\n"
     "- Request rate: http_requests_total, request_rate\n"
     "- Error rate: http_errors_total, error_rate\n"
     "- Response time: http_request_duration_seconds, response_time_ms\n\n"
     "Query: {query_str}\n\n"
     "Also extract the time window if mentioned (e.g., 'last 30 minutes', 'right now', 'past hour').\n"
-    "Respond in JSON format with:\n"
+    "Respond ONLY with valid JSON using DOUBLE QUOTES:\n"
     "{{\n"
-    "  'promql': '<your PromQL query>',\n"
-    "  'time_window': '<time window in minutes or 'current'>',\n"
-    "  'metric_type': '<cpu|memory|requests|errors|latency>'\n"
+    "  \"promql\": \"<your PromQL query>\",\n"
+    "  \"time_window\": \"<time window in minutes or 'current'>\",\n"
+    "  \"metric_type\": \"<cpu|memory|requests|errors|latency>\"\n"
     "}}\n\n"
     "Response:"
 )
@@ -85,9 +85,22 @@ class PrometheusQueryEngine(CustomQueryEngine):
         except (json.JSONDecodeError, ValueError, KeyError, AttributeError) as e:
             # Fallback if parsing fails - log the error for debugging
             print(f"Warning: Failed to parse PromQL generation response: {e}")
-            promql = "up{}"
-            time_window = 'current'
-            metric_type = 'unknown'
+            print(f"Raw LLM response: {response_text[:200]}...")
+            # Return error instead of misleading fallback data
+            return {
+                'query': query_str,
+                'promql': 'PARSE_ERROR',
+                'time_window': 'current',
+                'metric_type': 'error',
+                'results': {
+                    'metric': 'parse_error',
+                    'value': 0,
+                    'unit': '',
+                    'timestamp': datetime.now().isoformat(),
+                    'error': f'Failed to parse LLM response: {e}'
+                },
+                'summary': f'Error: Could not generate valid PromQL query. {e}'
+            }
         
         # Step 2: Execute the PromQL query
         results = self._query_prometheus_api(promql, time_window)

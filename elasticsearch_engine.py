@@ -28,13 +28,13 @@ ELASTICSEARCH_QUERY_PROMPT = PromptTemplate(
     "- Log level filter (INFO, WARN, ERROR, FATAL)\n"
     "- Application name if mentioned\n"
     "- Search terms or error patterns\n\n"
-    "Respond in JSON format with:\n"
+    "Respond ONLY with valid JSON using DOUBLE QUOTES:\n"
     "{{\n"
-    "  'query_type': '<errors|logs|traces>',\n"
-    "  'time_window': '<time window in minutes or 'all'>',\n"
-    "  'log_level': '<INFO|WARN|ERROR|FATAL|ALL>',\n"
-    "  'application': '<application name or 'all'>',\n"
-    "  'search_terms': ['<term1>', '<term2>']\n"
+    "  \"query_type\": \"<errors|logs|traces>\",\n"
+    "  \"time_window\": \"<time window in minutes or 'all'>\",\n"
+    "  \"log_level\": \"<INFO|WARN|ERROR|FATAL|ALL>\",\n"
+    "  \"application\": \"<application name or 'all'>\",\n"
+    "  \"search_terms\": [\"<term1>\", \"<term2>\"]\n"
     "}}\n\n"
     "Response:"
 )
@@ -45,11 +45,11 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
 
     llm: OpenAI
     elasticsearch_host: str = ""
-    index_pattern: str = "logs-*"
+    index_pattern: str = "application_logs"
 
     def __init__(self, llm: OpenAI,
                  elasticsearch_host: Optional[str] = None,
-                 index_pattern: str = "logs-*", **kwargs):
+                 index_pattern: str = "application_logs", **kwargs):
         """
         Initialize Elasticsearch query engine.
 
@@ -98,9 +98,10 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         except (json.JSONDecodeError, ValueError, KeyError, AttributeError) as e:
             # Fallback if parsing fails
             print(f"Warning: Failed to parse Elasticsearch query response: {e}")
-            query_type = 'logs'
+            # Smart defaults based on query keywords
+            query_type = 'errors' if 'error' in query_str.lower() else 'logs'
             time_window = '60'
-            log_level = 'ALL'
+            log_level = 'ERROR' if 'error' in query_str.lower() else 'ALL'
             application = 'all'
             search_terms = []
 

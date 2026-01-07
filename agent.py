@@ -5,7 +5,11 @@ Uses FunctionAgent with workflow-based approach to orchestrate queries across mu
 import os
 import asyncio
 from typing import Any, Optional, Callable
+from dotenv import load_dotenv
 from sqlalchemy import text
+
+# Load environment variables from .env file
+load_dotenv()
 from llama_index.core import SQLDatabase
 from llama_index.core.query_engine import NLSQLTableQueryEngine
 from llama_index.core.tools import QueryEngineTool

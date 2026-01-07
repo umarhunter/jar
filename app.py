@@ -8,7 +8,11 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from prometheus_client import make_wsgi_app
 import asyncio
 import os
+from dotenv import load_dotenv
 from agent import ObservabilityAgent
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 # Use environment variable for secret key, with secure random fallback for development
