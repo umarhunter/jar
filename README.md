@@ -80,6 +80,7 @@ docker compose up --build
 ```
 
 Access monitoring tools:
+- Oracle DB: `sqlite3 oracle.db` (SQLite simulating Oracle)
 - Prometheus UI: http://localhost:9090
 - Elasticsearch: http://localhost:9200
 
