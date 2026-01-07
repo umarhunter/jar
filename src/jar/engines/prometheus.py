@@ -10,16 +10,7 @@ import requests
 import json
 import os
 from datetime import datetime, timedelta
-
-
-def parse_llm_json_response(response_text: str) -> str:
-    """Extract JSON from LLM response that may be wrapped in code blocks."""
-    response_text = response_text.strip()
-    if response_text.startswith("```json"):
-        response_text = response_text.split("```json")[1].split("```")[0].strip()
-    elif response_text.startswith("```"):
-        response_text = response_text.split("```")[1].split("```")[0].strip()
-    return response_text
+from jar.engines.utils import parse_llm_json_response
 
 
 PROMQL_GENERATION_PROMPT = PromptTemplate(

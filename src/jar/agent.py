@@ -17,9 +17,9 @@ from llama_index.core.agent import ReActAgent
 from llama_index.llms.openai import OpenAI
 from llama_index.core.callbacks import CBEventType, CallbackManager
 from llama_index.core.callbacks.base import BaseCallbackHandler
-from prometheus_engine import PrometheusQueryEngine
-from elasticsearch_engine import ElasticsearchQueryEngine
-from oracle_db import get_database_engine
+from jar.engines.prometheus import PrometheusQueryEngine
+from jar.engines.elasticsearch import ElasticsearchQueryEngine
+from jar.database.models import get_database_engine
 
 
 class ReasoningCallbackHandler(BaseCallbackHandler):

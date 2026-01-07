@@ -15,7 +15,8 @@ docker compose up --build
 
 # Or run locally
 pip install -r requirements.txt
-python app.py
+export PYTHONPATH=$PWD/src
+python src/jar/app.py
 ```
 
 Access at `http://localhost:5001`
@@ -58,13 +59,38 @@ All services configured in `docker-compose.yml`:
 
 ```
 jar/
-├── app.py                   # Flask-SocketIO server
-├── agent.py                 # LlamaIndex agent orchestrator
-├── oracle_db.py             # Database setup
-├── prometheus_engine.py     # Prometheus query engine
-├── elasticsearch_engine.py  # Elasticsearch query engine
-├── templates/index.html     # Web interface
-└── static/                  # CSS/JS
+├── src/jar/                 # Main application package
+│   ├── app.py              # Flask-SocketIO server
+│   ├── agent.py            # LlamaIndex agent orchestrator
+│   ├── engines/            # Query engines
+│   │   ├── prometheus.py   # Prometheus query engine
+│   │   ├── elasticsearch.py # Elasticsearch query engine
+│   │   └── utils.py        # Shared utilities
+│   └── database/           # Database layer
+│       └── models.py       # Oracle DB models & setup
+## Development
+
+```bash
+# Local development
+export OPENAI_API_KEY='your-key'
+export PYTHONPATH=$PWD/src
+python src/jar/app.py
+
+# Run tests
+export PYTHONPATH=$PWD/src
+python tests/test_agent.py
+
+# Populate dummy data
+export PYTHONPATH=$PWD/src
+python scripts/populate_dummy_data.py
+
+# Docker development (with live reload)
+# Uncomment volume mount in docker-compose.yml
+docker compose up --build
+``` └── prometheus.yml
+├── data/                    # Runtime data (gitignored)
+├── docs/                    # Documentation
+└── docker-compose.yml       # Service orchestration
 ```
 
 ## Development

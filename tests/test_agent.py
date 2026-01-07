@@ -5,6 +5,10 @@ Tests the agent in a synchronous context similar to Flask-SocketIO.
 """
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Ensure we have the OpenAI API key
 if not os.environ.get('OPENAI_API_KEY'):
@@ -12,7 +16,7 @@ if not os.environ.get('OPENAI_API_KEY'):
     print("Please set it with: export OPENAI_API_KEY='your-key'")
     sys.exit(1)
 
-from agent import ObservabilityAgent
+from jar.agent import ObservabilityAgent
 
 def test_callback(progress_data):
     """Mock progress callback to see what's happening."""
@@ -50,8 +54,12 @@ def main():
         print(f"  Oracle:        {'✓ Connected' if status['oracle']['connected'] else '✗ Failed'}")
         if status['oracle']['error']:
             print(f"                 Error: {status['oracle']['error']}")
-        print(f"  Prometheus:    {'✓ Connected' if status['prometheus']['connected'] else '✗ Failed'} ({status['prometheus']['mode']})")
-        print(f"  Elasticsearch: {'✓ Connected' if status['elasticsearch']['connected'] else '✗ Failed'} ({status['elasticsearch']['mode']})")
+        print(f"  Prometheus:    {'✓ Connected' if status['prometheus']['connected'] else '✗ Failed'}")
+        if status['prometheus']['error']:
+            print(f"                 Error: {status['prometheus']['error']}")
+        print(f"  Elasticsearch: {'✓ Connected' if status['elasticsearch']['connected'] else '✗ Failed'}")
+        if status['elasticsearch']['error']:
+            print(f"                 Error: {status['elasticsearch']['error']}")
         
         if not all([status['oracle']['connected'], 
                    status['prometheus']['connected'], 

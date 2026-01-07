@@ -9,12 +9,14 @@ from prometheus_client import make_wsgi_app
 import asyncio
 import os
 from dotenv import load_dotenv
-from agent import ObservabilityAgent
+from jar.agent import ObservabilityAgent
 
 # Load environment variables from .env file
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, 
+            static_folder='../../web/static',
+            template_folder='../../web/templates')
 # Use environment variable for secret key, with secure random fallback for development
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
@@ -158,7 +160,7 @@ def handle_reset():
 
 if __name__ == '__main__':
     # Initialize database on startup
-    from oracle_db import create_sample_database
+    from jar.database.models import create_sample_database
     print("Initializing sample database...")
     create_sample_database()
     print("Database ready!")
