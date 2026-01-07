@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JAR - Agent Query Interface</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 JAR - Just Another RAG</h1>
+            <p class="subtitle">Real-time Agent Query Interface</p>
+            <div id="connection-status" class="status-badge disconnected">Disconnected</div>
+        </header>
+
+        <div class="main-content">
+            <!-- Chat/Query Interface -->
+            <div class="query-section">
+                <h2>Query Agent</h2>
+                <form id="query-form">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            id="query-input" 
+                            placeholder="Ask about system health, metrics, or errors..." 
+                            autocomplete="off"
+                        >
+                        <button type="submit" id="submit-btn">Send Query</button>
+                    </div>
+                </form>
+
+                <!-- Database Status Indicators -->
+                <div class="database-indicators">
+                    <div class="indicator" id="oracle-indicator">
+                        <div class="indicator-icon">🗄️</div>
+                        <div class="indicator-content">
+                            <div class="indicator-name">Oracle</div>
+                            <div class="indicator-status">Idle</div>
+                        </div>
+                    </div>
+                    <div class="indicator" id="prometheus-indicator">
+                        <div class="indicator-icon">📊</div>
+                        <div class="indicator-content">
+                            <div class="indicator-name">Prometheus</div>
+                            <div class="indicator-status">Idle</div>
+                        </div>
+                    </div>
+                    <div class="indicator" id="elasticsearch-indicator">
+                        <div class="indicator-icon">📝</div>
+                        <div class="indicator-content">
+                            <div class="indicator-name">Elasticsearch</div>
+                            <div class="indicator-status">Idle</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent Reasoning Display -->
+            <div class="reasoning-section">
+                <h2>Agent Activity & Reasoning</h2>
+                <div id="reasoning-log" class="reasoning-log"></div>
+            </div>
+
+            <!-- Results Display -->
+            <div class="results-section">
+                <h2>Query Results</h2>
+                <div id="results-display" class="results-display">
+                    <div class="empty-state">
+                        <p>🔍 No queries yet. Ask the agent something!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
