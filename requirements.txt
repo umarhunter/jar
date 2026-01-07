@@ -3,6 +3,6 @@ Flask-SocketIO==5.3.5
 python-socketio==5.10.0
 python-engineio==4.8.0
 eventlet==0.40.4
-llama-index==0.12.52
+llama-index==0.13.0
 sqlalchemy==2.0.23
 requests==2.31.0
