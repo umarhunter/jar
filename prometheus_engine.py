@@ -15,13 +15,16 @@ from datetime import datetime, timedelta
 PROMQL_GENERATION_PROMPT = PromptTemplate(
     "You are an expert in Prometheus and PromQL.\n"
     "Given a natural language query about metrics, generate the appropriate PromQL query.\n"
-    "Focus on these metric types:\n"
-    "- CPU usage: Use rate(node_cpu_seconds_total{mode!='idle'}[5m]) for non-idle CPU\n"
-    "- Memory usage: node_memory_MemAvailable_bytes, node_memory_MemTotal_bytes\n"
-    "- Request rate: http_requests_total, request_rate\n"
-    "- Error rate: http_errors_total, error_rate\n"
-    "- Response time: http_request_duration_seconds, response_time_ms\n\n"
+    "Available metrics in our system:\n"
+    "- CPU usage: node_cpu_usage (gauge showing CPU percentage per instance)\n"
+    "- Memory usage: node_memory_usage (gauge showing memory percentage per instance)\n"
+    "- Request rate: http_requests_total (counter)\n"
+    "- Error rate: http_errors_total (counter)\n"
+    "- Response time: http_request_duration_seconds (gauge)\n\n"
+    "Each metric has these labels: instance (service name), environment\n"
     "Query: {query_str}\n\n"
+    "For queries about multiple applications/services, return the metric WITHOUT filters to get all instances.\n"
+    "For queries about a specific service, add instance filter like: node_cpu_usage{{instance=\"user-service\"}}\n\n"
     "Also extract the time window if mentioned (e.g., 'last 30 minutes', 'right now', 'past hour').\n"
     "Respond ONLY with valid JSON using DOUBLE QUOTES:\n"
     "{{\n"
@@ -261,7 +264,7 @@ class PrometheusQueryEngine(CustomQueryEngine):
                 for app in all_results:
                     instance = app['instance']
                     app_value = app['value']
-                    status = "⚠️ HIGH" if app_value > 80 else "⚠️ MODERATE" if app_value > 60 else "✓ NORMAL"
+                    status = "🚨 HIGH" if app_value > 80 else "⚠️ MODERATE" if app_value > 60 else "✓ NORMAL"
                     summary_lines.append(f"  - {instance}: {app_value:.1f}{unit} ({status})")
                 return "\n".join(summary_lines)
             
@@ -270,7 +273,7 @@ class PrometheusQueryEngine(CustomQueryEngine):
                 for app in all_results:
                     instance = app['instance']
                     app_value = app['value']
-                    status = "⚠️ HIGH" if app_value > 85 else "⚠️ MODERATE" if app_value > 70 else "✓ NORMAL"
+                    status = "🚨 HIGH" if app_value > 85 else "⚠️ MODERATE" if app_value > 70 else "✓ NORMAL"
                     summary_lines.append(f"  - {instance}: {app_value:.1f}{unit} ({status})")
                 return "\n".join(summary_lines)
             
@@ -279,7 +282,7 @@ class PrometheusQueryEngine(CustomQueryEngine):
                 for app in all_results:
                     instance = app['instance']
                     app_value = app['value']
-                    status = "⚠️ HIGH" if app_value > 500 else "⚠️ MODERATE" if app_value > 300 else "✓ GOOD"
+                    status = "🚨 HIGH" if app_value > 500 else "⚠️ MODERATE" if app_value > 300 else "✓ GOOD"
                     summary_lines.append(f"  - {instance}: {app_value:.1f}{unit} ({status})")
                 return "\n".join(summary_lines)
             
