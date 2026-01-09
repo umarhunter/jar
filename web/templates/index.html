@@ -3,14 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JAR - Agent Query Interface</title>
+    <title>JAR - Observability Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>JAR - Just Another RAG</h1>
-            <p class="subtitle">Real-time Agent Query Interface</p>
+            <h1>JAR Observability Agent</h1>
+            <p class="subtitle">Natural Language Query Interface for System Metrics & Logs</p>
             <div id="connection-status" class="status-badge disconnected">Disconnected</div>
         </header>
 
@@ -20,34 +23,48 @@
                 <h2>Query Agent</h2>
                 <form id="query-form">
                     <div class="input-group">
-                        <input 
-                            type="text" 
-                            id="query-input" 
-                            placeholder="Ask about system health, metrics, or errors..." 
+                        <input
+                            type="text"
+                            id="query-input"
+                            placeholder="Ask me anything about system health, metrics, errors, or performance..."
                             autocomplete="off"
                         >
-                        <button type="submit" id="submit-btn">Send Query</button>
+                        <button type="submit" id="submit-btn">
+                            <span>Send Query</span>
+                        </button>
                     </div>
                 </form>
 
                 <!-- Database Status Indicators -->
                 <div class="database-indicators">
                     <div class="indicator" id="oracle-indicator">
-                        <div class="indicator-icon">DB</div>
+                        <div class="indicator-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                            </svg>
+                        </div>
                         <div class="indicator-content">
-                            <div class="indicator-name">Oracle</div>
+                            <div class="indicator-name">Oracle Database</div>
                             <div class="indicator-status">Idle</div>
                         </div>
                     </div>
                     <div class="indicator" id="prometheus-indicator">
-                        <div class="indicator-icon">PM</div>
+                        <div class="indicator-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                            </svg>
+                        </div>
                         <div class="indicator-content">
                             <div class="indicator-name">Prometheus</div>
                             <div class="indicator-status">Idle</div>
                         </div>
                     </div>
                     <div class="indicator" id="elasticsearch-indicator">
-                        <div class="indicator-icon">ES</div>
+                        <div class="indicator-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                            </svg>
+                        </div>
                         <div class="indicator-content">
                             <div class="indicator-name">Elasticsearch</div>
                             <div class="indicator-status">Idle</div>
@@ -67,7 +84,10 @@
                 <h2>Query Results</h2>
                 <div id="results-display" class="results-display">
                     <div class="empty-state">
-                        <p>No queries yet. Ask the agent something!</p>
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <p>No queries yet. Start by asking about your system!</p>
                     </div>
                 </div>
             </div>

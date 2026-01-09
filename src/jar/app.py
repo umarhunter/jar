@@ -2,12 +2,13 @@
 Flask-SocketIO application for natural language observability queries.
 Integrates LlamaIndex agent with WebSocket progress streaming.
 """
+import asyncio
+import os
+
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from prometheus_client import make_wsgi_app
-import asyncio
-import os
 from dotenv import load_dotenv
 from jar.agent import ObservabilityAgent
 
