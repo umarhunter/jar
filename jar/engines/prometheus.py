@@ -5,7 +5,7 @@ Translates natural language queries to PromQL and executes them.
 from typing import Any, Optional
 from llama_index.core.query_engine import CustomQueryEngine
 from llama_index.core import PromptTemplate
-from llama_index.llms.openai import OpenAI
+from llama_index.core.llms.llm import BaseLLM
 import requests
 import json
 import os
@@ -40,16 +40,16 @@ PROMQL_GENERATION_PROMPT = PromptTemplate(
 class PrometheusQueryEngine(CustomQueryEngine):
     """Custom query engine for Prometheus metrics."""
 
-    llm: OpenAI
+    llm: BaseLLM
     prometheus_url: str = ""
     progress_callback: Any = None
 
-    def __init__(self, llm: OpenAI, prometheus_url: Optional[str] = None, progress_callback: Any = None, **kwargs):
+    def __init__(self, llm: BaseLLM, prometheus_url: Optional[str] = None, progress_callback: Any = None, **kwargs):
         """
         Initialize Prometheus query engine.
 
         Args:
-            llm: OpenAI LLM instance
+            llm: LLM instance (OpenAI, Ollama, or any LlamaIndex-compatible LLM)
             prometheus_url: URL of Prometheus server (default: http://localhost:9090 or env PROMETHEUS_URL)
             progress_callback: Optional callback for progress updates
         """

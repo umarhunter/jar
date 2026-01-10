@@ -5,7 +5,7 @@ Translates natural language queries to Elasticsearch DSL and executes them.
 from typing import Any, Optional, List, Dict
 from llama_index.core.query_engine import CustomQueryEngine
 from llama_index.core.prompts import PromptTemplate
-from llama_index.llms.openai import OpenAI
+from llama_index.core.llms.llm import BaseLLM
 import requests
 import json
 import os
@@ -49,12 +49,12 @@ ELASTICSEARCH_QUERY_PROMPT = PromptTemplate(
 class ElasticsearchQueryEngine(CustomQueryEngine):
     """Custom query engine for Elasticsearch logs and traces."""
 
-    llm: OpenAI
+    llm: BaseLLM
     elasticsearch_host: str = ""
     index_pattern: str = "application_logs"
     progress_callback: Any = None
 
-    def __init__(self, llm: OpenAI,
+    def __init__(self, llm: BaseLLM,
                  elasticsearch_host: Optional[str] = None,
                  index_pattern: str = "application_logs",
                  progress_callback: Any = None, **kwargs):
@@ -62,7 +62,7 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
         Initialize Elasticsearch query engine.
 
         Args:
-            llm: OpenAI LLM instance
+            llm: LLM instance (OpenAI, Ollama, or any LlamaIndex-compatible LLM)
             elasticsearch_host: Elasticsearch host (default: http://localhost:9200 or env ELASTICSEARCH_HOST)
             index_pattern: Index pattern to search (default: logs-*)
             progress_callback: Optional callback for progress updates

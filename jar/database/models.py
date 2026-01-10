@@ -1,6 +1,6 @@
 """
 Oracle database setup with sample schema for application monitoring.
-Uses SQLite for the pilot phase to simulate Oracle database.
+Uses SQLite to simulate Oracle database.
 """
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base

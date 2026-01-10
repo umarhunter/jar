@@ -11,13 +11,14 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from prometheus_client import make_wsgi_app
 from dotenv import load_dotenv
 from jar.agent import ObservabilityAgent
+from jar.database.models import create_sample_database
 
 # Load environment variables from .env file
 load_dotenv()
 
-app = Flask(__name__, 
-            static_folder='../../web/static',
-            template_folder='../../web/templates')
+app = Flask(__name__,
+            static_folder='web/static',
+            template_folder='web/templates')
 # Use environment variable for secret key, with secure random fallback for development
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
@@ -49,29 +50,56 @@ def handle_connect():
     """Handle client connection."""
     global agent
     print('Client connected')
-    
+
     try:
         # Initialize agent on first connection if not already initialized
         if agent is None:
             emit('status', {'message': 'Initializing agent...', 'type': 'info'})
-            
-            # Check for OpenAI API key
-            api_key = os.environ.get('OPENAI_API_KEY')
-            if not api_key:
+
+            # Determine LLM provider
+            llm_provider = os.environ.get('LLM_PROVIDER', 'openai').lower()
+
+            if llm_provider == 'ollama':
+                # Ollama mode - no API key needed
+                ollama_model = os.environ.get('OLLAMA_MODEL', 'qwen2.5:14b')
+                ollama_base_url = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')
+
                 emit('status', {
-                    'message': 'Warning: OPENAI_API_KEY not set. Please set it to use the agent.',
-                    'type': 'warning'
+                    'message': f'Using Ollama (offline mode) with model {ollama_model}',
+                    'type': 'info'
                 })
-                return
-            
-            agent = ObservabilityAgent(
-                openai_api_key=api_key,
-                progress_callback=progress_callback,
-                verbose=True
-            )
-        
+
+                agent = ObservabilityAgent(
+                    llm_provider='ollama',
+                    ollama_model=ollama_model,
+                    ollama_base_url=ollama_base_url,
+                    progress_callback=progress_callback,
+                    verbose=True
+                )
+            else:
+                # OpenAI mode - API key required
+                api_key = os.environ.get('OPENAI_API_KEY')
+                if not api_key:
+                    emit('status', {
+                        'message': 'Warning: OPENAI_API_KEY not set. Please set it or switch to Ollama (LLM_PROVIDER=ollama).',
+                        'type': 'warning'
+                    })
+                    return
+
+                emit('status', {
+                    'message': 'Using OpenAI GPT-4o',
+                    'type': 'info'
+                })
+
+                agent = ObservabilityAgent(
+                    openai_api_key=api_key,
+                    llm_provider='openai',
+                    progress_callback=progress_callback,
+                    verbose=True
+                )
+
         emit('status', {'message': 'Connected to server. Agent ready.', 'type': 'success'})
-        
+
     except Exception as e:
         emit('status', {
             'message': f'Error initializing agent: {str(e)}',
@@ -107,8 +135,15 @@ def handle_query(data):
     try:
         # Check if agent is initialized
         if agent is None:
+            llm_provider = os.environ.get('LLM_PROVIDER', 'openai').lower()
+            error_msg = 'Agent not initialized. '
+            if llm_provider == 'ollama':
+                error_msg += 'Please check Ollama connection (OLLAMA_BASE_URL).'
+            else:
+                error_msg += 'Please check OPENAI_API_KEY.'
+
             emit('error', {
-                'message': 'Agent not initialized. Please check OPENAI_API_KEY.',
+                'message': error_msg,
                 'type': 'error',
                 'reasoning': 'Cannot process query without initialized agent'
             })
@@ -161,16 +196,17 @@ def handle_reset():
 
 if __name__ == '__main__':
     # Initialize database on startup
-    from jar.database.models import create_sample_database
+    
     print("Initializing sample database...")
     create_sample_database()
     print("Database ready!")
     
-    print("\n" + "="*60)
-    print("JAR - Just Another RAG - Natural Language Observability")
-    print("="*60)
-    print("Starting Flask-SocketIO server...")
-    print("Set OPENAI_API_KEY environment variable to use the agent")
-    print("="*60 + "\n")
+    llm_provider = os.environ.get('LLM_PROVIDER', 'openai').lower()
+    if llm_provider == 'ollama':
+        print("LLM Provider: Ollama (offline mode)")
+        print(f"Model: {os.environ.get('OLLAMA_MODEL', 'qwen2.5:14b')}")
+        print(f"Base URL: {os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')}")
+    else:
+        print("LLM Provider: OpenAI")
     
     socketio.run(app, debug=True, host='0.0.0.0', port=5001)

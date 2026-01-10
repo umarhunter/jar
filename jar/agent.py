@@ -8,19 +8,21 @@ from typing import Any, Optional, Callable
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-# Load environment variables from .env file
-load_dotenv()
 from llama_index.core import SQLDatabase
 from llama_index.core.query_engine import NLSQLTableQueryEngine
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.agent import ReActAgent
 from llama_index.llms.openai import OpenAI
+from llama_index.llms.ollama import Ollama
+from llama_index.core.llms.llm import BaseLLM
 from llama_index.core.callbacks import CBEventType, CallbackManager
 from llama_index.core.callbacks.base import BaseCallbackHandler
 from jar.engines.prometheus import PrometheusQueryEngine
 from jar.engines.elasticsearch import ElasticsearchQueryEngine
 from jar.database.models import get_database_engine
 
+# Load environment variables from .env file
+load_dotenv()
 
 class ReasoningCallbackHandler(BaseCallbackHandler):
     """Custom callback handler to capture agent reasoning steps."""
@@ -76,26 +78,54 @@ class ObservabilityAgent:
     Orchestrates queries across Oracle, Prometheus, and Elasticsearch data sources.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  openai_api_key: Optional[str] = None,
+                 llm_provider: Optional[str] = None,
+                 ollama_model: Optional[str] = None,
+                 ollama_base_url: Optional[str] = None,
                  progress_callback: Optional[Callable] = None,
                  verbose: bool = True):
         """
         Initialize the observability agent.
-        
+
         Args:
             openai_api_key: OpenAI API key (or set OPENAI_API_KEY env var)
+            llm_provider: LLM provider to use ('openai' or 'ollama', default: from env LLM_PROVIDER or 'openai')
+            ollama_model: Ollama model name (default: from env OLLAMA_MODEL or 'qwen2.5:14b')
+            ollama_base_url: Ollama base URL (default: from env OLLAMA_BASE_URL or 'http://localhost:11434')
             progress_callback: Function to call with progress updates
             verbose: Enable verbose logging
         """
         self.progress_callback = progress_callback
         self.verbose = verbose
-        
-        # Set up OpenAI
-        if openai_api_key:
-            os.environ['OPENAI_API_KEY'] = openai_api_key
-        
-        self.llm = OpenAI(model="gpt-4o", temperature=0)
+
+        # Determine LLM provider
+        provider = llm_provider or os.getenv('LLM_PROVIDER', 'openai').lower()
+
+        # Initialize LLM based on provider
+        if provider == 'ollama':
+            model = ollama_model or os.getenv('OLLAMA_MODEL', 'qwen2.5:14b')
+            base_url = ollama_base_url or os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+
+            self._emit_progress('llm_init', f'Initializing Ollama with model {model}...', None,
+                               f'Connecting to Ollama at {base_url}')
+
+            self.llm = Ollama(model=model, base_url=base_url, request_timeout=120.0)
+
+            self._emit_progress('llm_init_complete', f'Ollama initialized with {model}', None,
+                               'Ready to use local LLM (offline mode)')
+        else:
+            # Set up OpenAI
+            if openai_api_key:
+                os.environ['OPENAI_API_KEY'] = openai_api_key
+
+            self._emit_progress('llm_init', 'Initializing OpenAI GPT-4o...', None,
+                               'Connecting to OpenAI API')
+
+            self.llm = OpenAI(model="gpt-4o", temperature=0)
+
+            self._emit_progress('llm_init_complete', 'OpenAI GPT-4o initialized', None,
+                               'Ready to use cloud LLM')
         
         # Initialize data sources
         self._setup_oracle_engine()
