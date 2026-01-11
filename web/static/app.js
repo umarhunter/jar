@@ -5,6 +5,7 @@ const socket = io();
 const queryForm = document.getElementById('query-form');
 const queryInput = document.getElementById('query-input');
 const submitBtn = document.getElementById('submit-btn');
+const voiceBtn = document.getElementById('voice-btn');
 const reasoningLog = document.getElementById('reasoning-log');
 const resultsDisplay = document.getElementById('results-display');
 const connectionStatus = document.getElementById('connection-status');
@@ -13,11 +14,19 @@ const connectionStatus = document.getElementById('connection-status');
 const indicators = {
     oracle: document.getElementById('oracle-indicator'),
     prometheus: document.getElementById('prometheus-indicator'),
-    elasticsearch: document.getElementById('elasticsearch-indicator')
+    elasticsearch: document.getElementById('elasticsearch-indicator'),
+    analytics: document.getElementById('analytics-indicator')
 };
+
+// Data action buttons
+const precomputeBtn = document.getElementById('precompute-btn');
+const populateBtn = document.getElementById('populate-btn');
 
 // State
 let isProcessing = false;
+let isRecording = false;
+let mediaRecorder = null;
+let audioChunks = [];
 
 // Socket event handlers
 socket.on('connect', () => {
@@ -119,12 +128,12 @@ socket.on('error', (data) => {
 // Form submission
 queryForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    
+
     if (isProcessing) return;
-    
+
     const query = queryInput.value.trim();
     if (!query) return;
-    
+
     // Clear previous results and reset
     clearResults();
     clearReasoningLog();
@@ -133,15 +142,108 @@ queryForm.addEventListener('submit', (e) => {
     // Reset streaming state
     streamingResponse = '';
     streamingActive = false;
-    
+
     // Disable form
     isProcessing = true;
     submitBtn.disabled = true;
     submitBtn.textContent = 'Processing...';
-    
+
     // Send query to server
     socket.emit('query', { query });
 });
+
+// Voice input functionality
+voiceBtn.addEventListener('click', async () => {
+    if (isRecording) {
+        // Stop recording
+        stopRecording();
+    } else {
+        // Start recording
+        startRecording();
+    }
+});
+
+async function startRecording() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.addEventListener('dataavailable', (event) => {
+            audioChunks.push(event.data);
+        });
+
+        mediaRecorder.addEventListener('stop', async () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            await transcribeAudio(audioBlob);
+
+            // Stop all tracks
+            stream.getTracks().forEach(track => track.stop());
+        });
+
+        mediaRecorder.start();
+        isRecording = true;
+
+        // Update button UI
+        voiceBtn.classList.add('recording');
+        voiceBtn.title = 'Click to stop recording';
+
+        addReasoningEntry('system', 'Recording audio...', 'Listening for voice input');
+
+    } catch (error) {
+        console.error('Error accessing microphone:', error);
+        showNotification('Could not access microphone. Please check permissions.', 'error');
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        isRecording = false;
+
+        // Update button UI
+        voiceBtn.classList.remove('recording');
+        voiceBtn.title = 'Click to speak';
+
+        addReasoningEntry('system', 'Processing audio...', 'Transcribing speech to text');
+    }
+}
+
+async function transcribeAudio(audioBlob) {
+    try {
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.webm');
+
+        const response = await fetch('/transcribe', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Transcription failed');
+        }
+
+        const data = await response.json();
+
+        if (data.text) {
+            // Populate input with transcribed text
+            queryInput.value = data.text;
+            queryInput.focus();
+
+            addReasoningEntry('system', 'Transcription complete', `Recognized: "${data.text}"`);
+            showNotification('Voice input transcribed successfully', 'success');
+        } else {
+            throw new Error('No text received from transcription');
+        }
+
+    } catch (error) {
+        console.error('Transcription error:', error);
+        addReasoningEntry('error', 'Transcription failed', error.message);
+        showNotification(`Transcription error: ${error.message}`, 'error');
+    }
+}
 
 // Streaming helper functions
 function displayStreamingStart() {
@@ -327,6 +429,83 @@ document.addEventListener('keydown', (e) => {
         queryInput.value = '';
     }
 });
+
+// Data action button handlers
+if (precomputeBtn) {
+    precomputeBtn.addEventListener('click', async () => {
+        if (precomputeBtn.disabled) return;
+
+        precomputeBtn.disabled = true;
+        precomputeBtn.querySelector('span').textContent = 'Computing...';
+
+        addReasoningEntry('system', 'Starting baseline precomputation...', 'Regenerating historical baselines and patterns');
+
+        try {
+            const response = await fetch('/api/precompute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days: 120 })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                addReasoningEntry('system', 'Baseline precomputation complete!', 'All baselines and patterns updated');
+                showNotification('Baselines refreshed successfully', 'success');
+            } else {
+                addReasoningEntry('error', 'Precomputation failed', data.message || 'Unknown error');
+                showNotification('Failed to refresh baselines', 'error');
+            }
+        } catch (error) {
+            console.error('Precompute error:', error);
+            addReasoningEntry('error', 'Precomputation failed', error.message);
+            showNotification('Failed to refresh baselines', 'error');
+        } finally {
+            precomputeBtn.disabled = false;
+            precomputeBtn.querySelector('span').textContent = 'Refresh Baselines';
+        }
+    });
+}
+
+if (populateBtn) {
+    populateBtn.addEventListener('click', async () => {
+        if (populateBtn.disabled) return;
+
+        // Confirm action since it regenerates all data
+        if (!confirm('This will regenerate all dummy data (Oracle, Prometheus, Elasticsearch, and baselines). Continue?')) {
+            return;
+        }
+
+        populateBtn.disabled = true;
+        populateBtn.querySelector('span').textContent = 'Populating...';
+
+        addReasoningEntry('system', 'Starting full data population...', 'Regenerating all test data across data sources');
+
+        try {
+            const response = await fetch('/api/populate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                addReasoningEntry('system', 'Data population complete!', 'All data sources refreshed');
+                showNotification('All data populated successfully', 'success');
+            } else {
+                addReasoningEntry('error', 'Data population failed', data.message || 'Unknown error');
+                showNotification('Failed to populate data', 'error');
+            }
+        } catch (error) {
+            console.error('Populate error:', error);
+            addReasoningEntry('error', 'Data population failed', error.message);
+            showNotification('Failed to populate data', 'error');
+        } finally {
+            populateBtn.disabled = false;
+            populateBtn.querySelector('span').textContent = 'Populate All Data';
+        }
+    });
+}
 
 // Initialize JAR Natural Language Observability Client
 // Components: Socket.IO connection, event handlers, UI state management

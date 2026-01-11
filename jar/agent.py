@@ -19,6 +19,7 @@ from llama_index.core.callbacks import CBEventType, CallbackManager
 from llama_index.core.callbacks.base import BaseCallbackHandler
 from jar.engines.prometheus import PrometheusQueryEngine
 from jar.engines.elasticsearch import ElasticsearchQueryEngine
+from jar.engines.analytics import AnalyticsQueryEngine
 from jar.database.models import get_database_engine
 
 # Load environment variables from .env file
@@ -131,6 +132,7 @@ class ObservabilityAgent:
         self._setup_oracle_engine()
         self._setup_prometheus_engine()
         self._setup_elasticsearch_engine()
+        self._setup_analytics_engine()
 
         # Create agent with tools
         self._setup_agent()
@@ -156,7 +158,11 @@ class ObservabilityAgent:
         # Check Elasticsearch
         if not hasattr(self, 'elasticsearch_query_engine') or self.elasticsearch_query_engine is None:
             issues.append('Elasticsearch query engine not initialized')
-        
+
+        # Check Analytics
+        if not hasattr(self, 'analytics_query_engine') or self.analytics_query_engine is None:
+            issues.append('Analytics query engine not initialized')
+
         # Check Agent
         if not hasattr(self, 'agent') or self.agent is None:
             issues.append('Agent not initialized')
@@ -268,6 +274,19 @@ class ObservabilityAgent:
 
         self._emit_progress('setup_complete', 'Elasticsearch query engine initialized', 'elasticsearch',
                            'Ready to query application logs and traces')
+
+    def _setup_analytics_engine(self):
+        """Set up custom Analytics query engine for anomaly detection and pattern analysis."""
+        self._emit_progress('setup', 'Initializing Analytics query engine...', 'analytics',
+                           'Setting up anomaly detection and pattern analysis')
+
+        self.analytics_query_engine = AnalyticsQueryEngine(
+            llm=self.llm,
+            progress_callback=self.progress_callback
+        )
+
+        self._emit_progress('setup_complete', 'Analytics query engine initialized', 'analytics',
+                           'Ready for anomaly detection, trend analysis, and pattern recognition')
     
     def _setup_agent(self):
         """Set up the ReActAgent with query engine tools."""
@@ -324,16 +343,56 @@ class ObservabilityAgent:
             )
         )
 
+        analytics_tool = QueryEngineTool.from_defaults(
+            query_engine=self.analytics_query_engine,
+            name="analytics_insights",
+            description=(
+                "Perform advanced analytics, anomaly detection, and pattern analysis. "
+                "Use this for:\n"
+                "- Anomaly detection: Check if metrics are abnormal vs historical baselines\n"
+                "- Baseline comparison: Compare current values to 30/60/90/120 day averages\n"
+                "- Trend analysis: Identify increasing/decreasing trends over time\n"
+                "- Peak detection: Find peak traffic hours and patterns\n"
+                "- Availability checking: Get uptime and availability statistics\n"
+                "- Pattern recognition: Identify daily/weekly usage patterns\n"
+                "This tool uses pre-computed historical baselines for fast analysis.\n"
+                "IMPORTANT: For comprehensive anomaly analysis, consider also using:\n"
+                "- prometheus_metrics: To verify current real-time values\n"
+                "- elasticsearch_logs: To check for error patterns that might explain anomalies\n"
+                "Examples: 'Is the current CPU usage abnormal?', "
+                "'Compare latency to the 90-day baseline', 'What are the peak traffic times?', "
+                "'Is error rate anomalous compared to historical data?', "
+                "'What is the availability for payment-gateway over 7 days?'"
+            )
+        )
+
         # Create callback manager with reasoning handler
         reasoning_handler = ReasoningCallbackHandler(progress_callback=self.progress_callback)
         callback_manager = CallbackManager([reasoning_handler])
 
-        # Create ReActAgent with callback manager
+        # System prompt for agent behavior
+        system_prompt = (
+            "You are an expert observability agent with access to multiple data sources. "
+            "Your goal is to provide comprehensive, accurate answers.\n\n"
+            "IMPORTANT GUIDELINES:\n"
+            "1. When asked to 'investigate', 'verify', 'cross-reference', or 'confirm', you MUST call multiple tools "
+            "to gather data from different sources before answering.\n"
+            "2. For anomaly detection queries, consider checking both analytics_insights for baseline comparison "
+            "AND prometheus_metrics for current values AND elasticsearch_logs for error context when appropriate.\n"
+            "3. When a user explicitly asks you to investigate or be thorough, use multiple tools even if one tool "
+            "could answer the question.\n"
+            "4. Always be transparent about which data sources you consulted.\n"
+            "5. If you find contradictions between data sources, report them and explain possible reasons.\n\n"
+            "Be helpful, thorough, and accurate."
+        )
+
+        # Create ReActAgent with callback manager and system prompt
         self.agent = ReActAgent(
-            tools=[oracle_tool, prometheus_tool, elasticsearch_tool],
+            tools=[oracle_tool, prometheus_tool, elasticsearch_tool, analytics_tool],
             llm=self.llm,
             verbose=self.verbose,
-            callback_manager=callback_manager
+            callback_manager=callback_manager,
+            system_prompt=system_prompt
         )
 
         self._emit_progress('setup_complete', 'Agent ready to process queries', None,
@@ -387,7 +446,18 @@ class ObservabilityAgent:
     
     def reset(self):
         """Reset agent conversation history."""
-        # Reset the agent's chat history
-        self.agent.reset()
+        # Reset the agent's chat history if the method exists
+        if hasattr(self.agent, 'reset'):
+            self.agent.reset()
+        elif hasattr(self.agent, 'chat_history'):
+            self.agent.chat_history = []
+        elif hasattr(self.agent, 'memory'):
+            # Try to clear memory if available
+            try:
+                self.agent.memory.reset()
+            except Exception:
+                pass
+        # If none of these work, the agent will still function
+        # (just won't have conversation history cleared)
         self._emit_progress('reset', 'Agent conversation reset', None,
                            'Cleared conversation history for new query session')

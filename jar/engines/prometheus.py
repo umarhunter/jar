@@ -19,10 +19,13 @@ PROMQL_GENERATION_PROMPT = PromptTemplate(
     "Available metrics in our system:\n"
     "- CPU usage: node_cpu_usage (gauge showing CPU percentage per instance)\n"
     "- Memory usage: node_memory_usage (gauge showing memory percentage per instance)\n"
-    "- Request rate: http_requests_total (counter)\n"
-    "- Error rate: http_errors_total (counter)\n"
-    "- Response time: http_request_duration_seconds (gauge)\n\n"
+    "- Request rate: http_requests_total (gauge showing requests per minute per instance)\n"
+    "- Error rate: http_error_rate (gauge showing error percentage per instance)\n"
+    "- Error counts: http_errors_total (counter with 'code' label for HTTP status codes)\n"
+    "- Response time/Latency: http_request_duration_seconds (gauge in seconds per instance)\n"
+    "- Availability: service_availability (gauge showing availability percentage per instance)\n\n"
     "Each metric has these labels: instance (service name), environment\n"
+    "Available instances: user-service, payment-gateway, notification-service, analytics-engine\n\n"
     "Query: {query_str}\n\n"
     "For queries about multiple applications/services, return the metric WITHOUT filters to get all instances.\n"
     "For queries about a specific service, add instance filter like: node_cpu_usage{{instance=\"user-service\"}}\n\n"
@@ -31,7 +34,7 @@ PROMQL_GENERATION_PROMPT = PromptTemplate(
     "{{\n"
     "  \"promql\": \"<your PromQL query>\",\n"
     "  \"time_window\": \"<time window in minutes or 'current'>\",\n"
-    "  \"metric_type\": \"<cpu|memory|requests|errors|latency>\"\n"
+    "  \"metric_type\": \"<cpu|memory|requests|errors|latency|availability>\"\n"
     "}}\n\n"
     "Response:"
 )
@@ -281,7 +284,16 @@ class PrometheusQueryEngine(CustomQueryEngine):
                     status = "🚨 HIGH" if app_value > 500 else "⚠️ MODERATE" if app_value > 300 else "✓ GOOD"
                     summary_lines.append(f"  - {instance}: {app_value:.1f}{unit} ({status})")
                 return "\n".join(summary_lines)
-            
+
+            elif metric_type == 'availability':
+                summary_lines.append(f"Availability across {len(all_results)} applications:")
+                for app in all_results:
+                    instance = app['instance']
+                    app_value = app['value']
+                    status = "✓ EXCELLENT" if app_value >= 99.9 else "✓ GOOD" if app_value >= 99.0 else "⚠️ MODERATE" if app_value >= 95.0 else "🚨 LOW"
+                    summary_lines.append(f"  - {instance}: {app_value:.2f}% ({status})")
+                return "\n".join(summary_lines)
+
             else:
                 summary_lines.append(f"{metric} across {len(all_results)} applications:")
                 for app in all_results:
@@ -325,6 +337,16 @@ class PrometheusQueryEngine(CustomQueryEngine):
                 return f"Response time is acceptable: {value:.1f}{unit}"
             else:
                 return f"Response time is good: {value:.1f}{unit}"
-        
+
+        elif metric_type == 'availability':
+            if value >= 99.9:
+                return f"Excellent availability: {value:.2f}%"
+            elif value >= 99.0:
+                return f"Good availability: {value:.2f}%"
+            elif value >= 95.0:
+                return f"Moderate availability: {value:.2f}% - needs attention"
+            else:
+                return f"Low availability: {value:.2f}% - critical"
+
         else:
             return f"Metric {metric}: {value}{unit}"

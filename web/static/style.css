@@ -241,11 +241,56 @@ header h1 {
     cursor: not-allowed;
 }
 
+/* Voice Button */
+.voice-btn {
+    padding: var(--spacing-md);
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-base);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    height: 48px;
+}
+
+.voice-btn:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.voice-btn:active {
+    transform: translateY(0);
+}
+
+.voice-btn.recording {
+    background: var(--color-error);
+    border-color: var(--color-error);
+    color: white;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
 /* Database Indicators */
 .database-indicators {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
 }
 
 .indicator {
@@ -347,6 +392,55 @@ header h1 {
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.025em;
+}
+
+/* Data Action Buttons */
+.data-actions {
+    display: flex;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--color-bg-primary);
+    color: var(--color-text-secondary);
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    font-family: var(--font-sans);
+}
+
+.action-btn:hover:not(:disabled) {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.action-btn:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.action-btn svg {
+    flex-shrink: 0;
+}
+
+/* Analytics indicator specific color */
+.reasoning-entry.analytics {
+    border-left-color: #a855f7;
 }
 
 /* Reasoning Log */
@@ -613,13 +707,19 @@ header h1 {
 }
 
 /* Responsive Design */
+@media (max-width: 1200px) {
+    .database-indicators {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 @media (max-width: 1024px) {
     .main-content {
         grid-template-columns: 1fr;
     }
 
     .database-indicators {
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(2, 1fr);
     }
 }
 

@@ -2,13 +2,19 @@
 Oracle database setup with sample schema for application monitoring.
 Uses SQLite to simulate Oracle database.
 """
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 import random
+import os
 
 Base = declarative_base()
+
+# Database path configuration
+def get_db_path():
+    """Get the database path from environment or default."""
+    return os.getenv('DATABASE_PATH', 'oracle_pilot.db')
 
 
 class Application(Base):
@@ -39,7 +45,7 @@ class PerformanceThreshold(Base):
 class Incident(Base):
     """Historical incidents."""
     __tablename__ = 'incidents'
-    
+
     id = Column(Integer, primary_key=True)
     application_id = Column(Integer)
     application_name = Column(String(100))
@@ -49,6 +55,103 @@ class Incident(Base):
     occurred_at = Column(DateTime)
     resolved_at = Column(DateTime)
     status = Column(String(20))
+
+
+class MetricBaseline(Base):
+    """Pre-computed metric baselines for anomaly detection."""
+    __tablename__ = 'metric_baselines'
+
+    id = Column(Integer, primary_key=True)
+    application_name = Column(String(100), nullable=False)
+    metric_name = Column(String(50), nullable=False)  # cpu, memory, latency, error_rate, request_volume
+
+    # Rolling averages for different time windows
+    avg_30d = Column(Float)  # 30-day rolling average
+    avg_60d = Column(Float)  # 60-day rolling average
+    avg_90d = Column(Float)  # 90-day rolling average
+    avg_120d = Column(Float)  # 120-day rolling average
+
+    # Statistical measures for anomaly detection
+    stddev_30d = Column(Float)  # Standard deviation (30-day)
+    min_30d = Column(Float)  # Minimum value seen in 30 days
+    max_30d = Column(Float)  # Maximum value seen in 30 days
+
+    # Current/recent values for comparison
+    current_value = Column(Float)
+
+    # Metadata
+    unit = Column(String(20))  # percent, ms, count, requests/sec
+    last_updated = Column(DateTime, default=datetime.now)
+
+
+class TrafficPattern(Base):
+    """Traffic patterns by hour and day for peak detection."""
+    __tablename__ = 'traffic_patterns'
+
+    id = Column(Integer, primary_key=True)
+    application_name = Column(String(100), nullable=False)
+    metric_name = Column(String(50), nullable=False)  # Usually request_volume or latency
+
+    # Time dimensions
+    hour_of_day = Column(Integer)  # 0-23
+    day_of_week = Column(Integer)  # 0=Monday, 6=Sunday
+
+    # Aggregated values
+    avg_value = Column(Float)
+    min_value = Column(Float)
+    max_value = Column(Float)
+    sample_count = Column(Integer)  # Number of data points used
+
+    # Is this a peak period?
+    is_peak = Column(Boolean, default=False)
+
+    last_updated = Column(DateTime, default=datetime.now)
+
+
+class AvailabilityStats(Base):
+    """Application availability statistics."""
+    __tablename__ = 'availability_stats'
+
+    id = Column(Integer, primary_key=True)
+    application_name = Column(String(100), nullable=False)
+
+    # Availability percentages
+    uptime_percent_24h = Column(Float)  # Last 24 hours
+    uptime_percent_7d = Column(Float)   # Last 7 days
+    uptime_percent_30d = Column(Float)  # Last 30 days
+
+    # Downtime incidents
+    total_downtime_minutes_24h = Column(Float)
+    total_downtime_minutes_7d = Column(Float)
+    total_downtime_minutes_30d = Column(Float)
+
+    # Error-based availability (1 - error_rate)
+    error_free_percent_24h = Column(Float)
+    error_free_percent_7d = Column(Float)
+    error_free_percent_30d = Column(Float)
+
+    # Request success rate
+    success_rate_24h = Column(Float)
+    success_rate_7d = Column(Float)
+    success_rate_30d = Column(Float)
+
+    last_updated = Column(DateTime, default=datetime.now)
+
+
+class MetricTimeSeries(Base):
+    """Historical metric time series data for trend analysis."""
+    __tablename__ = 'metric_timeseries'
+
+    id = Column(Integer, primary_key=True)
+    application_name = Column(String(100), nullable=False)
+    metric_name = Column(String(50), nullable=False)
+
+    timestamp = Column(DateTime, nullable=False)
+    value = Column(Float, nullable=False)
+
+    # Optional labels
+    endpoint = Column(String(200))
+    environment = Column(String(50), default='production')
 
 
 def create_sample_database(db_path: str = 'oracle_pilot.db'):
@@ -184,9 +287,20 @@ def create_sample_database(db_path: str = 'oracle_pilot.db'):
     return engine
 
 
-def get_database_engine(db_path: str = 'oracle_pilot.db'):
+def get_database_engine(db_path: str = None):
     """Get or create database engine."""
-    import os
+    if db_path is None:
+        db_path = get_db_path()
     if not os.path.exists(db_path):
         return create_sample_database(db_path)
-    return create_engine(f'sqlite:///{db_path}')
+    # Ensure all tables exist (for migrations)
+    engine = create_engine(f'sqlite:///{db_path}')
+    Base.metadata.create_all(engine)
+    return engine
+
+
+def get_session(db_path: str = None):
+    """Get a database session."""
+    engine = get_database_engine(db_path)
+    Session = sessionmaker(bind=engine)
+    return Session()

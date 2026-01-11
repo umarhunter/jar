@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   jar:
     build:
@@ -9,8 +7,13 @@ services:
     ports:
       - "5001:5001"
     environment:
-      # Required: OpenAI API key (load from .env file)
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # LLM Provider: 'openai' or 'ollama' (default: openai)
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      # OpenAI Configuration (when LLM_PROVIDER=openai)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Ollama Configuration (when LLM_PROVIDER=ollama)
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       # Optional: Flask secret key (will generate random if not provided)
       - SECRET_KEY=${SECRET_KEY:-}
       # Database path inside container
@@ -36,6 +39,7 @@ services:
     depends_on:
       - prometheus
       - elasticsearch
+      - ollama
 
   prometheus:
     image: prom/prometheus:latest
@@ -94,12 +98,34 @@ services:
       - jar-network
     restart: unless-stopped
 
+  # Ollama for local LLM inference (offline mode)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: jar-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - jar-network
+    restart: unless-stopped
+    # Uncomment below if you have NVIDIA GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
 volumes:
   jar_data:
     driver: local
   prometheus_data:
     driver: local
   elasticsearch_data:
+    driver: local
+  ollama_data:
     driver: local
 
 networks:

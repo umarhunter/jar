@@ -5,13 +5,14 @@ Integrates LlamaIndex agent with WebSocket progress streaming.
 import asyncio
 import os
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from prometheus_client import make_wsgi_app
 from dotenv import load_dotenv
+from openai import OpenAI
 from jar.agent import ObservabilityAgent
-from jar.database.models import create_sample_database
+from jar.database.models import create_sample_database, get_db_path
 
 # Load environment variables from .env file
 load_dotenv()
@@ -179,7 +180,7 @@ def handle_query(data):
 def handle_reset():
     """Reset agent conversation history."""
     global agent
-    
+
     try:
         if agent:
             agent.reset()
@@ -192,6 +193,152 @@ def handle_reset():
             'message': f'Error resetting agent: {str(e)}',
             'type': 'error'
         })
+
+
+@app.route('/api/precompute', methods=['POST'])
+def precompute_baselines():
+    """
+    Manually trigger baseline precomputation.
+    This regenerates historical data and recomputes all baselines, patterns, and availability stats.
+    """
+    try:
+        # Import here to avoid circular imports
+        from scripts.populate_dummy_data import precompute_all_baselines, populate_prometheus_metrics
+
+        # Get optional parameters from request
+        data = request.get_json() or {}
+        days = data.get('days', 120)
+
+        # Emit progress via WebSocket if available
+        socketio.emit('status', {
+            'message': f'Starting baseline precomputation ({days} days)...',
+            'type': 'info'
+        })
+
+        # Run precomputation
+        result = precompute_all_baselines(days=days)
+
+        # Also refresh Prometheus current metrics
+        populate_prometheus_metrics()
+
+        if result.get('status') == 'success':
+            socketio.emit('status', {
+                'message': 'Baseline precomputation complete!',
+                'type': 'success'
+            })
+            return jsonify({
+                'status': 'success',
+                'message': 'Baselines precomputed successfully',
+                'details': result
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Precomputation failed',
+                'details': result
+            }), 500
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error during precomputation: {error_details}")
+        socketio.emit('status', {
+            'message': f'Precomputation failed: {str(e)}',
+            'type': 'error'
+        })
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/populate', methods=['POST'])
+def populate_all_data():
+    """
+    Populate all dummy data (Oracle, Prometheus, Elasticsearch, and baselines).
+    This is a full data refresh.
+    """
+    try:
+        from scripts.populate_dummy_data import (
+            populate_oracle_database,
+            precompute_all_baselines,
+            populate_elasticsearch_logs,
+            populate_prometheus_metrics
+        )
+
+        socketio.emit('status', {
+            'message': 'Starting full data population...',
+            'type': 'info'
+        })
+
+        # Get database path
+        db_path = get_db_path()
+
+        # Populate all data sources
+        populate_oracle_database(db_path)
+        precompute_all_baselines(db_path, days=120)
+        populate_elasticsearch_logs()
+        populate_prometheus_metrics()
+
+        socketio.emit('status', {
+            'message': 'Full data population complete!',
+            'type': 'success'
+        })
+
+        return jsonify({
+            'status': 'success',
+            'message': 'All data populated successfully'
+        })
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error during data population: {error_details}")
+        socketio.emit('status', {
+            'message': f'Data population failed: {str(e)}',
+            'type': 'error'
+        })
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/transcribe', methods=['POST'])
+def transcribe_audio():
+    """Transcribe audio file using OpenAI Whisper API."""
+    try:
+        # Check if audio file is present
+        if 'audio' not in request.files:
+            return jsonify({'error': 'No audio file provided'}), 400
+
+        audio_file = request.files['audio']
+
+        if audio_file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+
+        # Get OpenAI API key
+        api_key = os.environ.get('OPENAI_API_KEY')
+        if not api_key:
+            return jsonify({'error': 'OPENAI_API_KEY not configured'}), 500
+
+        # Initialize OpenAI client
+        client = OpenAI(api_key=api_key)
+
+        # Transcribe audio using Whisper
+        # Pass the file stream directly with a tuple (filename, file_stream)
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(audio_file.filename, audio_file.stream, audio_file.content_type)
+        )
+
+        return jsonify({'text': transcript.text})
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error transcribing audio: {error_details}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
