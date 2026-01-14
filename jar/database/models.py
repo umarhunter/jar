@@ -196,7 +196,7 @@ def create_sample_database(db_path: str = 'oracle_pilot.db'):
         ),
         Application(
             id=4,
-            name='analytics-engine',
+            name='metric-analysis',
             environment='production',
             status='active',
             owner='data-team',
@@ -232,10 +232,10 @@ def create_sample_database(db_path: str = 'oracle_pilot.db'):
         PerformanceThreshold(application_id=3, application_name='notification-service',
                            metric_name='memory_usage', threshold_value=80.0, unit='percent', severity='warning'),
         
-        # analytics-engine thresholds
-        PerformanceThreshold(application_id=4, application_name='analytics-engine',
+        # metric-analysis thresholds
+        PerformanceThreshold(application_id=4, application_name='metric-analysis',
                            metric_name='cpu_usage', threshold_value=90.0, unit='percent', severity='warning'),
-        PerformanceThreshold(application_id=4, application_name='analytics-engine',
+        PerformanceThreshold(application_id=4, application_name='metric-analysis',
                            metric_name='memory_usage', threshold_value=90.0, unit='percent', severity='warning'),
     ]
     

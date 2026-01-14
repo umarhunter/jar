@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 
 from llama_index.core import SQLDatabase
-from llama_index.core.query_engine import NLSQLTableQueryEngine
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.agent import ReActAgent
 from llama_index.llms.openai import OpenAI
@@ -17,6 +16,7 @@ from llama_index.llms.ollama import Ollama
 from llama_index.core.llms.llm import BaseLLM
 from llama_index.core.callbacks import CBEventType, CallbackManager
 from llama_index.core.callbacks.base import BaseCallbackHandler
+from jar.engines.oracle import OracleQueryEngine
 from jar.engines.prometheus import PrometheusQueryEngine
 from jar.engines.elasticsearch import ElasticsearchQueryEngine
 from jar.engines.analytics import AnalyticsQueryEngine
@@ -220,28 +220,29 @@ class ObservabilityAgent:
             })
     
     def _setup_oracle_engine(self):
-        """Set up Oracle (SQLite) query engine using NLSQLTableQueryEngine."""
+        """Set up Oracle (SQLite) query engine using custom OracleQueryEngine."""
         self._emit_progress('setup', 'Initializing Oracle database connection...', 'oracle',
                            'Setting up connection to configuration database')
-        
+
         try:
             # Get database engine
             engine = get_database_engine()
             sql_database = SQLDatabase(engine)
-            
+
             # Test the connection by running a simple query
             with engine.connect() as conn:
                 result = conn.execute(text("SELECT 1"))
                 result.fetchone()
-            
-            # Create NL to SQL query engine
-            self.oracle_query_engine = NLSQLTableQueryEngine(
+
+            # Create custom Oracle query engine with progress callback support
+            self.oracle_query_engine = OracleQueryEngine(
+                llm=self.llm,
                 sql_database=sql_database,
                 tables=['applications', 'performance_thresholds', 'incidents'],
-                llm=self.llm,
+                progress_callback=self.progress_callback,
                 verbose=self.verbose
             )
-            
+
             self._emit_progress('setup_complete', 'Oracle database connection established', 'oracle',
                                'Ready to query application configurations and thresholds')
         except Exception as e:
@@ -313,16 +314,22 @@ class ObservabilityAgent:
             query_engine=self.prometheus_query_engine,
             name="prometheus_metrics",
             description=(
-                "Query real-time performance metrics from Prometheus. "
-                "Use this to get current:\n"
+                "Query CURRENT and RECENT real-time performance metrics from Prometheus. "
+                "    TIME SCOPE: Only recent/current data (typically last few hours at most).\n"
+                "NOT FOR: Historical queries, long-term trends, 'in the past', 'ever', 'highest/lowest across days/weeks'.\n"
+                "✓ USE FOR: Real-time current state and very recent metrics.\n\n"
+                "Available metrics:\n"
                 "- CPU usage (percentage)\n"
                 "- Memory usage (percentage)\n"
                 "- Request rates (requests per second)\n"
                 "- Error counts and rates\n"
                 "- Response times and latency\n"
-                "Supports time windows like 'right now', 'last 30 minutes', 'past hour'.\n"
-                "Examples: 'What is the CPU usage?', 'How many errors in the last 30 minutes?', "
-                "'What is the current memory usage?'"
+                "Supports time windows: 'right now', 'last 30 minutes', 'past hour'.\n\n"
+                "Examples:\n"
+                "✓ 'What is the CURRENT CPU usage?'\n"
+                "✓ 'How many errors in the LAST 30 MINUTES?'\n"
+                "✗ 'What was the highest CPU ever?' (use analytics_insights instead)\n"
+                "✗ 'CPU usage over the past 120 days' (use analytics_insights instead)"
             )
         )
 
@@ -347,22 +354,28 @@ class ObservabilityAgent:
             query_engine=self.analytics_query_engine,
             name="analytics_insights",
             description=(
-                "Perform advanced analytics, anomaly detection, and pattern analysis. "
-                "Use this for:\n"
+                "Perform advanced analytics, anomaly detection, and pattern analysis using HISTORICAL DATA. "
+                "TIME SCOPE: Up to 120 days of historical data with pre-computed baselines.\n"
+                "✓ USE FOR: Historical queries, long-term trends, baselines, 'ever', 'in the past', 'highest/lowest across time'.\n\n"
+                "Capabilities:\n"
                 "- Anomaly detection: Check if metrics are abnormal vs historical baselines\n"
-                "- Baseline comparison: Compare current values to 30/60/90/120 day averages\n"
+                "- Baseline comparison: Compare to 30/60/90/120 day averages\n"
                 "- Trend analysis: Identify increasing/decreasing trends over time\n"
                 "- Peak detection: Find peak traffic hours and patterns\n"
-                "- Availability checking: Get uptime and availability statistics\n"
+                "- Availability checking: Get uptime and availability statistics (24h, 7d, 30d)\n"
                 "- Pattern recognition: Identify daily/weekly usage patterns\n"
-                "This tool uses pre-computed historical baselines for fast analysis.\n"
+                "- Historical extremes: Find highest/lowest values across the entire time range\n\n"
                 "IMPORTANT: For comprehensive anomaly analysis, consider also using:\n"
                 "- prometheus_metrics: To verify current real-time values\n"
-                "- elasticsearch_logs: To check for error patterns that might explain anomalies\n"
-                "Examples: 'Is the current CPU usage abnormal?', "
-                "'Compare latency to the 90-day baseline', 'What are the peak traffic times?', "
-                "'Is error rate anomalous compared to historical data?', "
-                "'What is the availability for payment-gateway over 7 days?'"
+                "- elasticsearch_logs: To check for error patterns that might explain anomalies\n\n"
+                "Examples:\n"
+                "✓ 'Is the current CPU usage abnormal compared to historical baselines?'\n"
+                "✓ 'What was the highest CPU usage in the past 120 days?'\n"
+                "✓ 'Compare latency to the 90-day baseline'\n"
+                "✓ 'What are the peak traffic times?'\n"
+                "✓ 'Show me availability for payment-gateway over 7 days'\n"
+                "✓ 'At any point in the past, what was the highest CPU?'\n"
+                "✗ 'What is the current CPU?' (use prometheus_metrics instead)"
             )
         )
 
@@ -374,16 +387,23 @@ class ObservabilityAgent:
         system_prompt = (
             "You are an expert observability agent with access to multiple data sources. "
             "Your goal is to provide comprehensive, accurate answers.\n\n"
-            "IMPORTANT GUIDELINES:\n"
-            "1. When asked to 'investigate', 'verify', 'cross-reference', or 'confirm', you MUST call multiple tools "
-            "to gather data from different sources before answering.\n"
-            "2. For anomaly detection queries, consider checking both analytics_insights for baseline comparison "
-            "AND prometheus_metrics for current values AND elasticsearch_logs for error context when appropriate.\n"
-            "3. When a user explicitly asks you to investigate or be thorough, use multiple tools even if one tool "
-            "could answer the question.\n"
-            "4. Always be transparent about which data sources you consulted.\n"
-            "5. If you find contradictions between data sources, report them and explain possible reasons.\n\n"
-            "Be helpful, thorough, and accurate."
+            "CRITICAL TOOL SELECTION RULES:\n"
+            "1. TEMPORAL QUERIES - Choose the correct tool based on time scope:\n"
+            "   - For 'current', 'now', 'right now', 'last N minutes/hours' → use prometheus_metrics\n"
+            "   - For 'historical', 'past', 'ever', 'in the last N days/weeks/months', 'highest/lowest over time', "
+            "'at any point', 'when was' → use analytics_insights\n"
+            "   - For 'baseline', 'trend', 'pattern', 'anomaly', 'compared to history' → use analytics_insights\n\n"
+            "2. CROSS-REFERENCING:\n"
+            "   - When asked to 'investigate', 'verify', 'cross-reference', or 'confirm', you MUST call multiple tools.\n"
+            "   - For anomaly detection, use analytics_insights for baseline comparison AND prometheus_metrics for "
+            "current values AND elasticsearch_logs for error context when appropriate.\n\n"
+            "3. THOROUGHNESS:\n"
+            "   - When a user explicitly asks you to investigate or be thorough, use multiple tools.\n"
+            "   - Always be transparent about which data sources you consulted.\n\n"
+            "4. HANDLING CONTRADICTIONS:\n"
+            "   - If you find contradictions between data sources, report them and explain possible reasons.\n"
+            "   - Remember: prometheus_metrics has ONLY current/recent data, while analytics_insights has 120 days of history.\n\n"
+            "Be helpful, thorough, and accurate. Choose the right tool for the time scope of the query."
         )
 
         # Create ReActAgent with callback manager and system prompt

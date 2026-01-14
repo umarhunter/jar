@@ -25,7 +25,7 @@ PROMQL_GENERATION_PROMPT = PromptTemplate(
     "- Response time/Latency: http_request_duration_seconds (gauge in seconds per instance)\n"
     "- Availability: service_availability (gauge showing availability percentage per instance)\n\n"
     "Each metric has these labels: instance (service name), environment\n"
-    "Available instances: user-service, payment-gateway, notification-service, analytics-engine\n\n"
+    "Available instances: user-service, payment-gateway, notification-service, metric-analysis\n\n"
     "Query: {query_str}\n\n"
     "For queries about multiple applications/services, return the metric WITHOUT filters to get all instances.\n"
     "For queries about a specific service, add instance filter like: node_cpu_usage{{instance=\"user-service\"}}\n\n"

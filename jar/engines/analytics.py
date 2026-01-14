@@ -27,17 +27,19 @@ ANALYTICS_QUERY_PROMPT = PromptTemplate(
     "- baseline_comparison: Compare current values to 30/60/90/120 day averages\n"
     "- peak_detection: Find peak traffic times and patterns\n"
     "- availability_check: Get availability and uptime statistics\n"
-    "- pattern_recognition: Identify daily/weekly patterns\n\n"
-    "Applications: user-service, payment-gateway, notification-service, analytics-engine\n"
+    "- pattern_recognition: Identify daily/weekly patterns\n"
+    "- historical_extremes: Find highest/lowest values across entire historical time range (120 days)\n\n"
+    "Applications: user-service, payment-gateway, notification-service, metric-analysis\n"
     "Metrics: cpu, memory, latency, request_volume, error_rate\n\n"
     "Query: {query_str}\n\n"
     "Respond ONLY with valid JSON using DOUBLE QUOTES:\n"
     "{{\n"
-    "  \"analysis_type\": \"<anomaly_detection|trend_analysis|baseline_comparison|peak_detection|availability_check|pattern_recognition>\",\n"
+    "  \"analysis_type\": \"<anomaly_detection|trend_analysis|baseline_comparison|peak_detection|availability_check|pattern_recognition|historical_extremes>\",\n"
     "  \"metric\": \"<cpu|memory|latency|request_volume|error_rate|all>\",\n"
     "  \"application\": \"<application name or 'all'>\",\n"
     "  \"time_window_days\": <30|60|90|120>,\n"
-    "  \"comparison_type\": \"<current_vs_average|current_vs_stddev|trend>\"\n"
+    "  \"comparison_type\": \"<current_vs_average|current_vs_stddev|trend>\",\n"
+    "  \"extreme_type\": \"<max|min|both>\"\n"
     "}}\n\n"
     "Response:"
 )
@@ -100,28 +102,45 @@ class AnalyticsQueryEngine(CustomQueryEngine):
         except Exception as e:
             print(f"Warning: Failed to parse analytics query: {e}")
             # Smart defaults based on keywords
-            analysis_type = 'anomaly_detection' if 'anomaly' in query_str.lower() or 'abnormal' in query_str.lower() else 'baseline_comparison'
+            query_lower = query_str.lower()
+
+            # Detect analysis type based on keywords
+            if 'highest' in query_lower or 'lowest' in query_lower or 'maximum' in query_lower or 'minimum' in query_lower or 'ever' in query_lower or 'at any point' in query_lower:
+                analysis_type = 'historical_extremes'
+            elif 'anomaly' in query_lower or 'abnormal' in query_lower:
+                analysis_type = 'anomaly_detection'
+            elif 'trend' in query_lower:
+                analysis_type = 'trend_analysis'
+            elif 'peak' in query_lower or 'traffic time' in query_lower:
+                analysis_type = 'peak_detection'
+            elif 'availability' in query_lower or 'uptime' in query_lower:
+                analysis_type = 'availability_check'
+            elif 'pattern' in query_lower:
+                analysis_type = 'pattern_recognition'
+            else:
+                analysis_type = 'baseline_comparison'
+
             metric = 'all'
             application = 'all'
-            time_window = 30
+            time_window = 120  # Default to full historical range
             comparison_type = 'current_vs_average'
 
             # Try to extract application name
-            for app in ['user-service', 'payment-gateway', 'notification-service', 'analytics-engine']:
-                if app.replace('-', ' ') in query_str.lower() or app in query_str.lower():
+            for app in ['user-service', 'payment-gateway', 'notification-service', 'metric-analysis']:
+                if app.replace('-', ' ') in query_lower or app in query_lower:
                     application = app
                     break
 
             # Try to extract metric
-            if 'cpu' in query_str.lower():
+            if 'cpu' in query_lower:
                 metric = 'cpu'
-            elif 'memory' in query_str.lower():
+            elif 'memory' in query_lower:
                 metric = 'memory'
-            elif 'latency' in query_str.lower() or 'response time' in query_str.lower():
+            elif 'latency' in query_lower or 'response time' in query_lower:
                 metric = 'latency'
-            elif 'error' in query_str.lower():
+            elif 'error' in query_lower:
                 metric = 'error_rate'
-            elif 'request' in query_str.lower() or 'traffic' in query_str.lower() or 'volume' in query_str.lower():
+            elif 'request' in query_lower or 'traffic' in query_lower or 'volume' in query_lower:
                 metric = 'request_volume'
 
         self._emit_progress('analysis_type', f'Performing {analysis_type}',
@@ -138,6 +157,8 @@ class AnalyticsQueryEngine(CustomQueryEngine):
             results = self._check_availability(application)
         elif analysis_type == 'pattern_recognition':
             results = self._recognize_patterns(application, metric)
+        elif analysis_type == 'historical_extremes':
+            results = self._find_historical_extremes(application, metric, time_window)
         else:  # baseline_comparison
             results = self._compare_baselines(application, metric, time_window)
 
@@ -404,6 +425,69 @@ class AnalyticsQueryEngine(CustomQueryEngine):
         finally:
             session.close()
 
+    def _find_historical_extremes(self, application: str, metric: str, time_window: int) -> Dict:
+        """Find the highest/lowest values across entire historical time range."""
+        session = get_session(self.db_path)
+        try:
+            cutoff = datetime.now() - timedelta(days=time_window)
+
+            query = session.query(MetricTimeSeries).filter(
+                MetricTimeSeries.timestamp >= cutoff
+            )
+            if application != 'all':
+                query = query.filter(MetricTimeSeries.application_name == application)
+            if metric != 'all':
+                query = query.filter(MetricTimeSeries.metric_name == metric)
+
+            data_points = query.all()
+
+            if not data_points:
+                return {'error': 'No historical data available', 'extremes': []}
+
+            # Group by application and metric
+            grouped = {}
+            for dp in data_points:
+                key = (dp.application_name, dp.metric_name)
+                if key not in grouped:
+                    grouped[key] = []
+                grouped[key].append({
+                    'timestamp': dp.timestamp,
+                    'value': dp.value
+                })
+
+            extremes = []
+            for (app, met), points in grouped.items():
+                values = [p['value'] for p in points]
+                max_point = max(points, key=lambda p: p['value'])
+                min_point = min(points, key=lambda p: p['value'])
+
+                # Get unit from baselines
+                baseline = session.query(MetricBaseline).filter(
+                    MetricBaseline.application_name == app,
+                    MetricBaseline.metric_name == met
+                ).first()
+                unit = baseline.unit if baseline else ''
+
+                extremes.append({
+                    'application': app,
+                    'metric': met,
+                    'max_value': round(max_point['value'], 2),
+                    'max_timestamp': max_point['timestamp'].isoformat(),
+                    'min_value': round(min_point['value'], 2),
+                    'min_timestamp': min_point['timestamp'].isoformat(),
+                    'avg_value': round(sum(values) / len(values), 2),
+                    'data_points': len(points),
+                    'unit': unit
+                })
+
+            return {
+                'extremes': extremes,
+                'time_window': f'{time_window} days',
+                'total_data_points': len(data_points)
+            }
+        finally:
+            session.close()
+
     def _recognize_patterns(self, application: str, metric: str = 'request_volume') -> Dict:
         """Recognize daily and weekly patterns."""
         session = get_session(self.db_path)
@@ -545,6 +629,19 @@ class AnalyticsQueryEngine(CustomQueryEngine):
 
         elif analysis_type == 'pattern_recognition':
             return results.get('pattern_summary', 'No pattern data available.')
+
+        elif analysis_type == 'historical_extremes':
+            extremes = results.get('extremes', [])
+            if not extremes:
+                return "No historical data available."
+            summary_parts = [f"Historical extremes across {results.get('time_window', '120 days')}:"]
+            for e in extremes:
+                summary_parts.append(
+                    f"  - {e['application']}/{e['metric']}: "
+                    f"Max: {e['max_value']}{e['unit']} (at {e['max_timestamp']}), "
+                    f"Min: {e['min_value']}{e['unit']} (at {e['min_timestamp']})"
+                )
+            return "\n".join(summary_parts)
 
         return "Analysis complete."
 

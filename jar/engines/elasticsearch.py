@@ -30,9 +30,10 @@ ELASTICSEARCH_QUERY_PROMPT = PromptTemplate(
     "  * 'last 24 hours' or 'today' -> 1440\n"
     "  * 'last 7 days' or 'past week' -> 10080\n"
     "  * 'last 30 days' or 'past month' -> 43200\n"
-    "  * 'all time' or no time mentioned -> 'all'\n"
+    "  * If no specific time is mentioned (e.g., 'show errors', 'what errors'), default to 10080 (7 days) to capture recent activity\n"
+    "  * 'all time' or 'all errors ever' -> 'all'\n"
     "- Log level filter (INFO, WARN, ERROR, FATAL)\n"
-    "- Application name if mentioned (match: payment-gateway, user-service, notification-service, analytics-engine)\n"
+    "- Application name if mentioned (match: payment-gateway, user-service, notification-service, metric-analysis)\n"
     "- Search terms or error patterns\n\n"
     "Respond ONLY with valid JSON using DOUBLE QUOTES:\n"
     "{{\n"
@@ -110,7 +111,7 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
             response_text = parse_llm_json_response(response.text)
             query_info = json.loads(response_text)
             query_type = query_info.get('query_type', 'logs')
-            time_window = query_info.get('time_window', '60')
+            time_window = query_info.get('time_window', '10080')  # Default to 7 days for better coverage
             log_level = query_info.get('log_level', 'ALL')
             application = query_info.get('application', 'all')
             search_terms = query_info.get('search_terms', [])
@@ -129,8 +130,10 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
                 time_window = '10080'  # 7 days
             elif '24 hour' in query_str.lower() or 'today' in query_str.lower() or 'day' in query_str.lower():
                 time_window = '1440'  # 24 hours
+            elif 'hour' in query_str.lower() or 'minute' in query_str.lower():
+                time_window = '60'  # Last hour if specifically mentioned
             else:
-                time_window = '60'
+                time_window = '10080'  # Default to 7 days for better coverage
             
             log_level = 'ERROR' if 'error' in query_str.lower() else 'ALL'
             
@@ -142,7 +145,7 @@ class ElasticsearchQueryEngine(CustomQueryEngine):
             elif 'notification' in query_str.lower():
                 application = 'notification-service'
             elif 'analytics' in query_str.lower():
-                application = 'analytics-engine'
+                application = 'metric-analysis'
             else:
                 application = 'all'
             
