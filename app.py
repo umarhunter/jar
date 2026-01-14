@@ -260,6 +260,7 @@ def populate_all_data():
     """
     try:
         from scripts.populate_dummy_data import (
+            wipe_databases,
             populate_oracle_database,
             precompute_all_baselines,
             populate_elasticsearch_logs,
@@ -271,10 +272,17 @@ def populate_all_data():
             'type': 'info'
         })
 
+        # Step 1: Wipe existing databases
+        socketio.emit('status', {
+            'message': 'Wiping existing databases...',
+            'type': 'info'
+        })
+        wipe_databases()
+
         # Get database path
         db_path = get_db_path()
 
-        # Populate all data sources
+        # Step 2-5: Populate all data sources
         populate_oracle_database(db_path)
         precompute_all_baselines(db_path, days=120)
         populate_elasticsearch_logs()
