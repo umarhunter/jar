@@ -67,7 +67,7 @@ APPLICATIONS = {
         'error_rate_variance': 0.2,
         'availability_baseline': 99.8,
     },
-    'analytics-engine': {
+    'metric-analysis': {
         'cpu_baseline': 70,  # CPU intensive
         'cpu_variance': 20,
         'memory_baseline': 75,
@@ -96,7 +96,8 @@ DAILY_TRAFFIC_PATTERN = [1.0, 1.1, 1.0, 1.05, 0.9, 0.5, 0.4]
 
 def generate_metric_value(baseline: float, variance: float,
                           hour: int = 12, day_of_week: int = 2,
-                          add_anomaly: bool = False) -> float:
+                          add_anomaly: bool = False,
+                          metric_type: str = '') -> float:
     """Generate a realistic metric value with time-based patterns."""
     # Apply time-based patterns
     hourly_multiplier = HOURLY_TRAFFIC_PATTERN[hour]
@@ -110,7 +111,14 @@ def generate_metric_value(baseline: float, variance: float,
     if add_anomaly and random.random() < 0.02:  # 2% chance of anomaly
         value *= random.uniform(1.5, 2.5)
 
-    return max(0, value)  # Ensure non-negative
+    # Ensure non-negative
+    value = max(0, value)
+
+    # Cap percentage-based metrics at 100%
+    if metric_type in ['cpu', 'memory', 'error_rate']:
+        value = min(100, value)
+
+    return value
 
 
 def generate_historical_timeseries(days: int = 120) -> Dict[str, List[Dict]]:
@@ -149,7 +157,8 @@ def generate_historical_timeseries(days: int = 120) -> Dict[str, List[Dict]]:
                         'value': generate_metric_value(
                             app_config['cpu_baseline'],
                             app_config['cpu_variance'],
-                            hour, day_of_week, add_anomaly
+                            hour, day_of_week, add_anomaly,
+                            metric_type='cpu'
                         )
                     })
 
@@ -158,7 +167,8 @@ def generate_historical_timeseries(days: int = 120) -> Dict[str, List[Dict]]:
                         'value': generate_metric_value(
                             app_config['memory_baseline'],
                             app_config['memory_variance'],
-                            hour, day_of_week, add_anomaly
+                            hour, day_of_week, add_anomaly,
+                            metric_type='memory'
                         )
                     })
 
@@ -167,7 +177,8 @@ def generate_historical_timeseries(days: int = 120) -> Dict[str, List[Dict]]:
                         'value': generate_metric_value(
                             app_config['latency_baseline'],
                             app_config['latency_variance'],
-                            hour, day_of_week, add_anomaly
+                            hour, day_of_week, add_anomaly,
+                            metric_type='latency'
                         )
                     })
 
@@ -176,17 +187,19 @@ def generate_historical_timeseries(days: int = 120) -> Dict[str, List[Dict]]:
                         'value': generate_metric_value(
                             app_config['request_rate_baseline'],
                             app_config['request_rate_variance'],
-                            hour, day_of_week, add_anomaly
+                            hour, day_of_week, add_anomaly,
+                            metric_type='request_volume'
                         )
                     })
 
                     timeseries[app_name]['error_rate'].append({
                         'timestamp': timestamp,
-                        'value': max(0, min(100, generate_metric_value(
+                        'value': generate_metric_value(
                             app_config['error_rate_baseline'],
                             app_config['error_rate_variance'],
-                            hour, day_of_week, add_anomaly
-                        )))
+                            hour, day_of_week, add_anomaly,
+                            metric_type='error_rate'
+                        )
                     })
 
         print(f"  Generated {len(timeseries[app_name]['cpu'])} data points for {app_name}")
@@ -195,8 +208,8 @@ def generate_historical_timeseries(days: int = 120) -> Dict[str, List[Dict]]:
 
 
 def compute_baselines(timeseries: Dict[str, List[Dict]], session) -> None:
-    """Compute and store metric baselines from time series data."""
-    print("\nComputing metric baselines...")
+    """Compute and store metric baselines from time series data, excluding outliers."""
+    print("\nComputing metric baselines (excluding outliers)...")
 
     now = datetime.now()
 
@@ -217,22 +230,68 @@ def compute_baselines(timeseries: Dict[str, List[Dict]], session) -> None:
                          if (now - p['timestamp']).days <= 90]
             values_120d = [p['value'] for p in data_points]
 
-            # Calculate statistics
-            def calc_stats(values):
+            # Calculate statistics EXCLUDING outliers using IQR method
+            def calc_stats_excluding_outliers(values):
+                """
+                Calculate statistics excluding outliers using the IQR method.
+                This ensures baseline calculations are not polluted by anomalies.
+                """
                 if not values:
                     return 0, 0, 0, 0
-                avg = sum(values) / len(values)
-                variance = sum((x - avg) ** 2 for x in values) / len(values)
-                stddev = math.sqrt(variance)
-                return avg, stddev, min(values), max(values)
 
-            avg_30d, stddev_30d, min_30d, max_30d = calc_stats(values_30d)
-            avg_60d, _, _, _ = calc_stats(values_60d)
-            avg_90d, _, _, _ = calc_stats(values_90d)
-            avg_120d, _, _, _ = calc_stats(values_120d)
+                # Sort values for percentile calculation
+                sorted_values = sorted(values)
+                n = len(sorted_values)
+
+                # Calculate quartiles
+                q1_idx = n // 4
+                q3_idx = 3 * n // 4
+                q1 = sorted_values[q1_idx]
+                q3 = sorted_values[q3_idx]
+                iqr = q3 - q1
+
+                # Define outlier bounds (1.5 * IQR is standard for outlier detection)
+                lower_bound = q1 - 1.5 * iqr
+                upper_bound = q3 + 1.5 * iqr
+
+                # Filter out outliers
+                clean_values = [v for v in values if lower_bound <= v <= upper_bound]
+
+                # If we filtered out too many values, use original (fallback)
+                if len(clean_values) < len(values) * 0.5:
+                    clean_values = values
+
+                # Calculate statistics on clean data
+                avg = sum(clean_values) / len(clean_values)
+                variance = sum((x - avg) ** 2 for x in clean_values) / len(clean_values)
+                stddev = math.sqrt(variance)
+
+                # Min/max from ALL data (including outliers) for reference
+                min_val = min(values)
+                max_val = max(values)
+
+                return avg, stddev, min_val, max_val
+
+            avg_30d, stddev_30d, min_30d, max_30d = calc_stats_excluding_outliers(values_30d)
+            avg_60d, _, _, _ = calc_stats_excluding_outliers(values_60d)
+            avg_90d, _, _, _ = calc_stats_excluding_outliers(values_90d)
+            avg_120d, _, _, _ = calc_stats_excluding_outliers(values_120d)
 
             # Get current value (most recent)
+            # For some applications, inject recent anomalies to test detection
             current_value = data_points[-1]['value'] if data_points else 0
+
+            # Inject anomalies for certain app/metric combinations to ensure detection works
+            if app_name == 'payment-gateway' and metric_name == 'latency':
+                # Inject a significant latency spike (3.2x baseline, ensures z-score > 2)
+                current_value = avg_30d * 3.2
+            elif app_name == 'notification-service' and metric_name == 'request_volume':
+                # Inject a request volume spike (anomaly can be high OR low)
+                # Spike to baseline plus 3 standard deviations
+                current_value = avg_30d + 3.5 * stddev_30d
+            elif app_name == 'user-service' and metric_name == 'error_rate':
+                # Inject an error rate spike (5x baseline, ensures z-score > 2)
+                current_value = min(10, avg_30d * 5.0)
 
             # Determine unit
             unit_map = {
@@ -259,10 +318,10 @@ def compute_baselines(timeseries: Dict[str, List[Dict]], session) -> None:
             )
             session.add(baseline)
 
-        print(f"  Computed baselines for {app_name}")
+        print(f"  Computed baselines for {app_name} (outliers removed from statistics)")
 
     session.commit()
-    print("  Baselines stored in database")
+    print("  Baselines stored in database (clean statistics, with injected anomalies for testing)")
 
 
 def compute_traffic_patterns(timeseries: Dict[str, List[Dict]], session) -> None:
@@ -518,14 +577,14 @@ def populate_prometheus_metrics():
     metrics_text.append("# HELP node_cpu_usage Current CPU usage percentage")
     metrics_text.append("# TYPE node_cpu_usage gauge")
     for app_name, config in APPLICATIONS.items():
-        value = generate_metric_value(config['cpu_baseline'], config['cpu_variance'], hour, day_of_week)
+        value = generate_metric_value(config['cpu_baseline'], config['cpu_variance'], hour, day_of_week, metric_type='cpu')
         metrics_text.append(f'node_cpu_usage{{instance="{app_name}",environment="production"}} {value:.2f}')
 
     # Memory Usage
     metrics_text.append("# HELP node_memory_usage Current memory usage percentage")
     metrics_text.append("# TYPE node_memory_usage gauge")
     for app_name, config in APPLICATIONS.items():
-        value = generate_metric_value(config['memory_baseline'], config['memory_variance'], hour, day_of_week)
+        value = generate_metric_value(config['memory_baseline'], config['memory_variance'], hour, day_of_week, metric_type='memory')
         metrics_text.append(f'node_memory_usage{{instance="{app_name}",environment="production"}} {value:.2f}')
 
     # Response Time / Latency
@@ -533,7 +592,7 @@ def populate_prometheus_metrics():
     metrics_text.append("# TYPE http_request_duration_seconds gauge")
     for app_name, config in APPLICATIONS.items():
         # Convert ms to seconds for Prometheus convention
-        value_ms = generate_metric_value(config['latency_baseline'], config['latency_variance'], hour, day_of_week)
+        value_ms = generate_metric_value(config['latency_baseline'], config['latency_variance'], hour, day_of_week, metric_type='latency')
         value_sec = value_ms / 1000.0
         metrics_text.append(f'http_request_duration_seconds{{instance="{app_name}",environment="production"}} {value_sec:.4f}')
 
@@ -541,14 +600,14 @@ def populate_prometheus_metrics():
     metrics_text.append("# HELP http_requests_total Total HTTP requests per minute")
     metrics_text.append("# TYPE http_requests_total gauge")
     for app_name, config in APPLICATIONS.items():
-        value = generate_metric_value(config['request_rate_baseline'], config['request_rate_variance'], hour, day_of_week)
+        value = generate_metric_value(config['request_rate_baseline'], config['request_rate_variance'], hour, day_of_week, metric_type='request_volume')
         metrics_text.append(f'http_requests_total{{instance="{app_name}",environment="production"}} {value:.0f}')
 
     # Error Rate
     metrics_text.append("# HELP http_error_rate Current error rate percentage")
     metrics_text.append("# TYPE http_error_rate gauge")
     for app_name, config in APPLICATIONS.items():
-        value = max(0, min(100, generate_metric_value(config['error_rate_baseline'], config['error_rate_variance'], hour, day_of_week)))
+        value = generate_metric_value(config['error_rate_baseline'], config['error_rate_variance'], hour, day_of_week, metric_type='error_rate')
         metrics_text.append(f'http_error_rate{{instance="{app_name}",environment="production"}} {value:.2f}')
 
     # Error counts by type (for detailed error analysis)
@@ -723,9 +782,6 @@ def populate_elasticsearch_logs():
             }
         }
 
-        # Delete existing index if exists
-        requests.delete(f"{elasticsearch_url}/{index_name}", timeout=5)
-
         # Create index
         response = requests.put(
             f"{elasticsearch_url}/{index_name}",
@@ -778,6 +834,43 @@ def populate_elasticsearch_logs():
         print("    docker-compose up -d elasticsearch")
 
 
+def wipe_databases():
+    """Wipe all existing databases to start fresh."""
+    print("\n" + "="*60)
+    print("WIPING EXISTING DATABASES")
+    print("="*60)
+
+    # 1. Wipe SQLite database
+    db_path = get_db_path()
+    if os.path.exists(db_path):
+        os.remove(db_path)
+        print(f"  ✓ Deleted SQLite database: {db_path}")
+    else:
+        print(f"  ○ SQLite database not found: {db_path}")
+
+    # 2. Wipe Elasticsearch index
+    es_host = os.getenv('ELASTICSEARCH_HOST', 'http://localhost:9200')
+    try:
+        response = requests.delete(f"{es_host}/application_logs", timeout=5)
+        if response.status_code in [200, 404]:
+            print(f"  ✓ Deleted Elasticsearch index: application_logs")
+        else:
+            print(f"  ○ Elasticsearch index status: {response.status_code}")
+    except requests.RequestException as e:
+        print(f"  ○ Could not connect to Elasticsearch (will create fresh index later)")
+
+    # 3. Clear Prometheus Pushgateway metrics
+    pg_host = os.getenv('PUSHGATEWAY_URL', 'http://localhost:9091')
+    try:
+        requests.delete(f"{pg_host}/metrics/job/observability_metrics", timeout=5)
+        requests.delete(f"{pg_host}/metrics/job/test_metrics", timeout=5)
+        print(f"  ✓ Cleared Prometheus Pushgateway metrics")
+    except requests.RequestException as e:
+        print(f"  ○ Could not connect to Pushgateway (will create fresh metrics later)")
+
+    print("  Database wipe complete!\n")
+
+
 def populate_oracle_database(db_path: str = None):
     """Populate Oracle database (SQLite) with sample data."""
     print("\n" + "="*60)
@@ -802,28 +895,31 @@ def populate_oracle_database(db_path: str = None):
 def main():
     """Run all population scripts."""
     print("\n" + "="*60)
-    print("DUMMY DATA POPULATION SCRIPT (Enhanced)")
+    print("DUMMY DATA POPULATION SCRIPT")
     print("="*60)
-    print("\nThis script will populate test data into:")
-    print("  1. Oracle Database (SQLite) - Base tables")
-    print("  2. Oracle Database (SQLite) - Baselines & Patterns (precomputed)")
-    print("  3. Prometheus (via Pushgateway) - Current metrics")
-    print("  4. Elasticsearch - Application logs")
+    print("\nThis script will:")
+    print("  1. Wipe existing databases (SQLite, Elasticsearch, Prometheus)")
+    print("  2. Populate Oracle Database (SQLite) - Base tables & baselines")
+    print("  3. Populate Prometheus (via Pushgateway) - Current metrics")
+    print("  4. Populate Elasticsearch - Application logs")
     print("\n" + "="*60)
+
+    # Step 1: Wipe existing databases
+    wipe_databases()
 
     # Get database path
     db_path = get_db_path()
 
-    # Populate Oracle base tables (always works, local SQLite)
+    # Step 2: Populate Oracle base tables
     populate_oracle_database(db_path)
 
-    # Precompute baselines (this is the new enhanced part)
+    # Step 3: Precompute baselines and patterns
     precompute_all_baselines(db_path, days=120)
 
-    # Populate Elasticsearch
+    # Step 4: Populate Elasticsearch logs
     populate_elasticsearch_logs()
 
-    # Populate Prometheus (current metrics)
+    # Step 5: Populate Prometheus current metrics
     populate_prometheus_metrics()
 
     print("\n" + "="*60)
