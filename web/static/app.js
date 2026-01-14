@@ -358,7 +358,7 @@ function displayResult(data) {
     card.className = 'result-card healthy';
     
     let html = `
-        <div class="result-header">✓ Query Complete</div>
+        <div class="result-header">Query Complete</div>
         <div class="result-query">Query: "${escapeHtml(data.query || '')}"</div>
         <div class="result-response">
             <h3>Response:</h3>
